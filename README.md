@@ -2,7 +2,7 @@
 
 This repository contains a clean and efficient version of Physically Consistent Neural Networks (PCNNs), where a physics-inspired module runs in parallel of a black-box one (neural networks) to capture physical effects.
 
-![Getting Started](docs/PCNN.pdf)
+![PCNN](docs/PCNN.svg)
 
 ## Installation
 After cloning the repository on your computer, go to the pcnn folder with `cd path_to_the_folder/pcnn`.  
