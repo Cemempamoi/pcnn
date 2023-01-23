@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 from typing import Union
 
-from parameters import DATA_SAVE_PATH
+from pcnn.parameters import DATA_SAVE_PATH
 
 def load_data(save_name: str, save_path: str = DATA_SAVE_PATH) -> pd.DataFrame:
     """

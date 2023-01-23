@@ -26,4 +26,4 @@ Submitted to _Applied Energy_ (2023).
 https://arxiv.org/abs/2212.12380.
 
 ## Contact
-For additional information, pleasae contact loris.dinatale@empa.ch
+For additional information, pleasae contact loris.dinatale@empa.chgit pu
