@@ -1,6 +1,17 @@
 # Physically Consistent Neural Networks
 
-This repository contains a clean and efficient version of Physically Consistent Neural Networks.
+This repository contains a clean and efficient version of Physically Consistent Neural Networks (PCNNs), where a physics-inspired module runs in parallel of a black-box one (neural networks) to capture physical effects.
+
+![Getting Started](docs/PCNN.pdf)
+
+## Installation
+After cloning the repository on your computer, go to the pcnn folder with `cd path_to_the_folder/pcnn`.  
+
+The fastest way to run the code is to use `poetry`, which can be installed from [here](https://python-poetry.org/docs/#installation).  
+You can then run `poetry install` to install all the required dependencies.  
+Once the dependencies are installed, you can for example run jupyter-lab with `poetry run jupiter lab` or VS code with `poetry run code .`.
+
+Alternatively, you can install requirements from `requirements.txt`.
 
 ## Related publications
 
