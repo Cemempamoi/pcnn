@@ -283,7 +283,7 @@ class PCNN(nn.Module):
         # Find sequences in the batch where there actually is heating/cooling
         # Trick needed to put padded values back to zero power before detecting power intputs
         temp = torch.where(x[:, :, self.power_column] > 0.05, x[:, :, self.power_column], self.zero_power)
-        mask = torch.where(torch.abs(temp - self.zero_power) > 1e-6, True, False).squeeze()
+        mask = torch.where(torch.abs(temp - self.zero_power) > 1e-6, True, False).squeeze(1)
 
         if len(mask) > 0:
 
@@ -582,7 +582,7 @@ class S_PCNN(nn.Module):
         # Find sequences in the batch where there actually is heating/cooling
         # Trick needed to put padded values back to zero power before detecting power intputs
         temp = torch.where(x[:, :, self.power_column] > 0.05, x[:, :, self.power_column], self.zero_power)
-        mask = torch.where(torch.abs(temp - self.zero_power) > 1e-6, True, False).squeeze().sum(axis=-1) > 0
+        mask = torch.where(torch.abs(temp - self.zero_power) > 1e-6, True, False).squeeze(1).sum(axis=-1) > 0
         
         if len(mask) > 0:
 
@@ -904,7 +904,7 @@ class M_PCNN(nn.Module):
         # Find sequences in the batch where there actually is heating/cooling
         # Trick needed to put padded values back to zero power before detecting power intputs
         temp = torch.where(x[:, :, self.power_column] > 0.05, x[:, :, self.power_column], self.zero_power)
-        mask = torch.where(torch.abs(temp - self.zero_power) > 1e-6, True, False).squeeze().sum(axis=-1) > 0
+        mask = torch.where(torch.abs(temp - self.zero_power) > 1e-6, True, False).squeeze(1).sum(axis=-1) > 0
 
         if len(mask) > 0:
 

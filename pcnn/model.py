@@ -520,7 +520,7 @@ class Model:
             parameter_scalings['b'] = [1 / (1.5 / (self.dataset.max_ - self.dataset.min_)[self.temperature_column]
                                            * 0.8 / 25 / 6 / 60 * self.dataset.interval).mean()]
             parameter_scalings['c'] = [1 / (1.5 / (self.dataset.max_ - self.dataset.min_)[self.temperature_column]
-                                           * 0.8 / 25 / 6 / 60 * self.dataset.interval).mean()]
+                                           * 0.8 / 25 / 6 / 60 * self.dataset.interval).mean() / 10]
 
             # needed condition to make sure to deal with data in Watts and kWs
             if (self.dataset.max_ - self.dataset.min_)[self.power_column[0]] > 100:
@@ -976,7 +976,8 @@ class Model:
         else:
             save_name = os.path.join(self.save_name, "best_model.pt")
 
-        print("\nTrying to load a trained model...")
+        if self.verbose > 0:
+            print("\nTrying to load a trained model...")
         try:
             # Build the full path to the model and check its existence
 
