@@ -660,6 +660,7 @@ class Model:
             The predictions and the true output
         """
 
+        return_y = True
         if sequences is not None:
             # Ensure the given sequences are a list of list, not only one list
             if type(sequences) == tuple:
@@ -669,13 +670,24 @@ class Model:
             batch_x, batch_y = self.build_input_output_from_sequences(sequences=sequences)
 
         elif data is not None:
-            batch_x = data[0].reshape(data[0].shape[0], data[0].shape[1], -1)
-            batch_y = data[1].reshape(data[0].shape[0], data[0].shape[1], len(self.rooms))
+            if isinstance(data, tuple):
+                if len(data[0].shape) == 3:
+                    batch_x = data[0].reshape(data[0].shape[0], data[0].shape[1], -1)
+                    batch_y = data[1].reshape(data[0].shape[0], data[0].shape[1], len(self.rooms))
+                else:
+                    batch_x = data[0].reshape(1, data[0].shape[0], -1)
+                    batch_y = data[1].reshape(1, data[0].shape[0], len(self.rooms))
+            else:
+                if len(data.shape) == 3:
+                    batch_x = data.reshape(data.shape[0], data.shape[1], -1)
+                else:
+                    batch_x = data.reshape(1, data.shape[0], -1)
+                return_y = False
 
         else:
             raise ValueError("Either sequences or data must be provided to the `predict` function")
 
-        predictions = torch.zeros_like(batch_y).to(self.device)
+        predictions = torch.zeros((batch_x.shape[0], batch_x.shape[1], len(self.rooms))).to(self.device)
         states = None
 
         # Iterate through the sequences of data to predict each step, replacing the true power and temperature
@@ -685,7 +697,10 @@ class Model:
             pred, states = self.model(batch_x[:, i, :], states, warm_start=i<self.warm_start_length)
             predictions[:, i, :] = pred
 
-        return predictions, batch_y
+        if return_y:
+            return predictions, batch_y
+        else:
+            return predictions
 
     def scale_back_predictions(self, sequences: Union[list, int] = None, data: torch.Tensor = None):
         """
