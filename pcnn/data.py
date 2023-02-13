@@ -197,7 +197,7 @@ def prepare_data(data: pd.DataFrame, interval: int, model_kwargs: dict, Y_column
     """
 
     # Use the custom function to load and prepare the full dataset from the NEST data
-    dataset = DataSet(data=data, interval=interval, to_normalize=model_kwargs['to_normalize'], 
+    dataset = DataSet(data=data.copy(), interval=interval, to_normalize=model_kwargs['to_normalize'], 
                         to_standardize=model_kwargs['to_standardize'])
 
     if verbose > 0:
