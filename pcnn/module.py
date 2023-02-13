@@ -285,23 +285,22 @@ class PCNN(nn.Module):
         temp = torch.where(x[:, :, self.power_column] > 0.05, x[:, :, self.power_column], self.zero_power)
         mask = torch.where(torch.abs(temp - self.zero_power) > 1e-6, True, False).squeeze(1)
 
-        if len(mask) > 0:
+        if sum(mask) > 0:
 
             # Find heating and cooling sequences
-            heating = x[mask, 0, self.case_column] > 0.5
-            cooling = x[mask, 0, self.case_column] < 0.5
+            heating = x[:, 0, self.case_column] > 0.5
+            cooling = x[:, 0, self.case_column] < 0.5
 
-            temp = x[mask, -1, :].clone()
             # Substract the 'zero power' to get negative values for cooling power
-            power = temp[:, self.power_column] - self.zero_power
+            power = x[:, -1, self.power_column].clone() - self.zero_power
 
             if sum(heating) > 0:
                 # Heating effect: add a*u to 'E'
-                E[mask][heating, :] = E[mask][heating, :].clone() + self.a(power[heating]) / self.a_scaling
+                E[mask & heating, :] = E[mask & heating, :].clone() + self.a(power[mask & heating]) / self.a_scaling
 
             if sum(cooling) > 0:
                 # Cooling effect: add d*u (where u<0 now, so we actually subtract energy) to 'E'
-                E[mask][cooling, :] = E[mask][cooling, :].clone() + self.d(power[cooling]) / self.d_scaling
+                E[mask & cooling, :] = E[mask & cooling, :].clone() + self.d(power[mask & cooling]) / self.d_scaling
 
         # Recall 'D' and 'E' for the next time step
         self.last_D = D.clone()
@@ -584,27 +583,26 @@ class S_PCNN(nn.Module):
         temp = torch.where(x[:, :, self.power_column] > 0.05, x[:, :, self.power_column], self.zero_power)
         mask = torch.where(torch.abs(temp - self.zero_power) > 1e-6, True, False).squeeze(1).sum(axis=-1) > 0
         
-        if len(mask) > 0:
+        if sum(mask) > 0:
 
             # Find heating and cooling sequences
-            heating = x[mask, 0, self.case_column] > 0.5
-            cooling = x[mask, 0, self.case_column] < 0.5
+            heating = x[:, 0, self.case_column] > 0.5
+            cooling = x[:, 0, self.case_column] < 0.5
 
-            temp = x[mask, -1, :].clone()
             # Substract the 'zero power' to get negative values for cooling power
-            power = temp[:, self.power_column] - self.zero_power
+            power = x[:, -1, self.power_column].clone() - self.zero_power
 
             if sum(heating) > 0:
                 # Heating effect: add a*u to 'E'
                 for i in range(len(self.topology['Rooms'])):
-                    E[mask][heating, i] = E[mask][heating, i].clone() + self.a[i](
-                        power[heating, i].unsqueeze(-1)).squeeze() / self.a_scaling[i]
+                    E[mask & heating, i] = E[mask & heating, i].clone() + self.a[i](
+                        power[mask & heating, i].unsqueeze(-1)).squeeze() / self.a_scaling[i]
 
             if sum(cooling) > 0:
                 # Cooling effect: add d*u (where u<0 now, so we actually subtract energy) to 'E'
                 for i in range(len(self.topology['Rooms'])):
-                    E[mask][cooling, i] = E[mask][cooling, i].clone() + self.d[i](
-                        power[cooling, i].unsqueeze(-1)).squeeze() / self.d_scaling[i]
+                    E[mask & cooling, i] = E[mask & cooling, i].clone() + self.d[i](
+                        power[mask & cooling, i].unsqueeze(-1)).squeeze() / self.d_scaling[i]
 
         # Recall 'D' and 'E' for the next time step
         self.last_D = D.clone()
@@ -906,28 +904,27 @@ class M_PCNN(nn.Module):
         temp = torch.where(x[:, :, self.power_column] > 0.05, x[:, :, self.power_column], self.zero_power)
         mask = torch.where(torch.abs(temp - self.zero_power) > 1e-6, True, False).squeeze(1).sum(axis=-1) > 0
 
-        if len(mask) > 0:
+        if sum(mask) > 0:
 
             # Find heating and cooling sequences
-            heating = x[mask, 0, self.case_column] > 0.5
-            cooling = x[mask, 0, self.case_column] < 0.5
+            heating = x[:, 0, self.case_column] > 0.5
+            cooling = x[:, 0, self.case_column] < 0.5
 
-            temp = x[mask, -1, :].clone()
             # Substract the 'zero power' to get negative values for cooling power
-            power = temp[:, self.power_column] - self.zero_power
+            power = x[:, -1, self.power_column].clone() - self.zero_power
 
             if sum(heating) > 0:
                 # Heating effect: add a*u to 'E'
                 for i in range(len(self.topology['Rooms'])):
-                    E[mask][heating, i] = E[mask][heating, i].clone() \
-                                                  + self.a[i](power[heating, i].unsqueeze(-1)).squeeze() \
+                    E[mask & heating, i] = E[mask & heating, i].clone() \
+                                                  + self.a[i](power[mask & heating, i].unsqueeze(-1)).squeeze() \
                                                   / self.a_scaling[i]
 
             if sum(cooling) > 0:
                 # Cooling effect: add d*u (where u<0 now, so we actually subtract energy) to 'E'
                 for i in range(len(self.topology['Rooms'])):
-                    E[mask][cooling, i] = E[mask][cooling, i].clone() \
-                                                  + self.d[i](power[cooling, i].unsqueeze(-1)).squeeze() \
+                    E[mask & cooling, i] = E[mask & cooling, i].clone() \
+                                                  + self.d[i](power[mask & cooling, i].unsqueeze(-1)).squeeze() \
                                                   / self.d_scaling[i]
 
         # Recall 'D' and 'E' for the next time step
