@@ -520,7 +520,7 @@ class Model:
             parameter_scalings['b'] = [1 / (1.5 / (self.dataset.max_ - self.dataset.min_)[self.temperature_column]
                                            * 0.8 / 25 / 6 / 60 * self.dataset.interval).mean()]
             parameter_scalings['c'] = [1 / (1.5 / (self.dataset.max_ - self.dataset.min_)[self.temperature_column]
-                                           * 0.8 / 25 / 6 / 60 * self.dataset.interval).mean() / 10]
+                                           * 0.8 / 25 / 6 / 60 * self.dataset.interval).mean()]
 
             # needed condition to make sure to deal with data in Watts and kWs
             if (self.dataset.max_ - self.dataset.min_)[self.power_column[0]] > 100:
@@ -797,6 +797,7 @@ class Model:
             # Start the training, define a list to retain the training losses along the way
             self.model.train()
             train_losses = []
+            train_sizes = []
 
             # Adjust the learning rate if wanted
             if self.decrease_learning_rate:
@@ -817,14 +818,15 @@ class Model:
                 self.optimizer.step()
                 self.optimizer.zero_grad()
                 train_losses.append(float(loss))
+                train_sizes.append(len(batch_sequences))
 
                 # Regularly print the current state of things
                 if (self.verbose > 1) & (num_batch % print_each == print_each - 1):
-                    print(f"Loss batch {num_batch + 1}: {float(loss): .5f}")
+                    print(f"Loss batch {num_batch + 1}: {float(loss):.2E}")
 
             # Compute the average loss of the training epoch and print it
-            train_loss = sum(train_losses) / len(train_losses)
-            print(f"Average training loss after {epoch + 1} epochs: {train_loss}")
+            train_loss = sum([l*s for l,s in zip(train_losses, train_sizes)]) / sum(train_sizes)
+            print(f"Average training loss after {epoch + 1} epochs: {train_loss:.2E}")
             self.train_losses.append(train_loss)
 
             # Start the validation, again defining a list to recall the losses
@@ -832,47 +834,52 @@ class Model:
                 print(f"Validation epoch {epoch + 1}...")
             validation_losses = []
             _validation_losses = []
+            validation_sizes = []
+            _validation_sizes = []
 
             # Create validation batches and run through them. Note that we use larger batches
             # to accelerate it a bit, and there is no need to shuffle the indices
-            for num_batch, batch_indices in enumerate(self.batch_iterator(iterator_type="validation", batch_size=2 * self.batch_size, shuffle=False)):
+            for num_batch, batch_sequences in enumerate(self.batch_iterator(iterator_type="validation", batch_size=2 * self.batch_size, shuffle=False)):
 
                 # Compute the loss, in the torch.no_grad setting: we don't need the model to
                 # compute and use gradients here, we are not training
                 if 'PiNN' not in self.name:
                     self.model.eval()
                     with torch.no_grad():
-                        loss = self.compute_loss(batch_indices)
+                        loss = self.compute_loss(batch_sequences)
                         validation_losses.append(float(loss))
+                        validation_sizes.append(len(batch_sequences))
                         # Regularly print the current state of things
                         if (self.verbose > 1) & (num_batch % (print_each//2) == (print_each//2) - 1):
-                            print(f"Loss batch {num_batch + 1}: {float(loss): .5f}")
+                            print(f"Loss batch {num_batch + 1}: {float(loss):.2E}")
 
                 else:
                     self.model.train()
-                    loss = self.compute_loss(batch_indices)
+                    loss = self.compute_loss(batch_sequences)
                     validation_losses.append(float(loss))
+                    validation_sizes.append(len(batch_sequences))
                     # Regularly print the current state of things
                     if (self.verbose > 1) & (num_batch % (print_each//2) == (print_each//2) - 1):
-                        print(f"Loss batch {num_batch + 1}: {float(loss): .5f}")
+                        print(f"Loss batch {num_batch + 1}: {float(loss):.2E}")
                     self.model.eval()
                     with torch.no_grad():
-                        loss = self._compute_loss(batch_indices)
+                        loss = self._compute_loss(batch_sequences)
                         _validation_losses.append(float(loss))
+                        _validation_sizes.append(len(batch_sequences))
                         # Regularly print the current state of things
                         if (self.verbose > 1) & (num_batch % (print_each//2) == (print_each//2) - 1):
-                            print(f"Loss batch {num_batch + 1}: {float(loss): .5f}")
+                            print(f"Loss batch {num_batch + 1}: {float(loss):.2E}")
 
             # Compute the average validation loss of the epoch and print it
-            validation_loss = sum(validation_losses) / len(validation_losses)
+            validation_loss = sum([l*s for l,s in zip(validation_losses, train_sizes)]) / sum(validation_sizes)
             self.validation_losses.append(validation_loss)
-            print(f"Average validation loss after {epoch + 1} epochs: {validation_loss}")
+            print(f"Average validation loss after {epoch + 1} epochs: {validation_loss:.2E}")
 
             if 'PiNN' in self.name:
-                _validation_loss = sum(_validation_losses) / len(_validation_losses)
+                _validation_loss = sum([l*s for l,s in zip(_validation_losses, train_sizes)]) / sum(_validation_sizes)
                 self._validation_losses.append(_validation_loss)
                 if self.verbose > 0:
-                    print(f"Average accuracy validation loss after {epoch + 1} epochs: {_validation_loss}")
+                    print(f"Average accuracy validation loss after {epoch + 1} epochs: {_validation_loss:.2E}")
 
             # Timing information
             self.times.append(time.time())
