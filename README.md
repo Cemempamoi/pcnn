@@ -5,6 +5,12 @@ This repository contains a clean and efficient version of Physically Consistent 
 ![PCNN](docs/PCNN.svg)
 
 ## Installation
+
+### Using pip
+
+With a python version above 3.10, you can install it directly through PyPI with `pip install pcnns`.
+
+### Local installation
 After cloning the repository on your computer, go to the pcnn folder with `cd path_to_the_folder/pcnn`.  
 
 The fastest way to run the code is to use `poetry`, which can be installed from [here](https://python-poetry.org/docs/#installation).  
