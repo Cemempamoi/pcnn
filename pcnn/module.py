@@ -288,19 +288,19 @@ class PCNN(nn.Module):
         if sum(mask) > 0:
 
             # Find heating and cooling sequences
-            heating = x[:, 0, self.case_column] > 0.5
-            cooling = x[:, 0, self.case_column] < 0.5
+            heating = x[:, 0, [self.case_column]] > 0.5
+            cooling = x[:, 0, [self.case_column]] < 0.5
 
             # Substract the 'zero power' to get negative values for cooling power
             power = x[:, -1, self.power_column].clone() - self.zero_power
 
             if sum(heating) > 0:
                 # Heating effect: add a*u to 'E'
-                E[mask & heating, :] = E[mask & heating, :].clone() + self.a(power[mask & heating]) / self.a_scaling
+                E[mask & heating] = E[mask & heating].clone() + self.a(power[mask & heating].unsqueeze(-1)).squeeze(-1) / self.a_scaling
 
             if sum(cooling) > 0:
                 # Cooling effect: add d*u (where u<0 now, so we actually subtract energy) to 'E'
-                E[mask & cooling, :] = E[mask & cooling, :].clone() + self.d(power[mask & cooling]) / self.d_scaling
+                E[mask & cooling] = E[mask & cooling].clone() + self.d(power[mask & cooling].unsqueeze(-1)).squeeze(-1) / self.d_scaling
 
         # Recall 'D' and 'E' for the next time step
         self.last_D = D.clone()

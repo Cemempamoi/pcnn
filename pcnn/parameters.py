@@ -7,12 +7,11 @@ in the individual parameters below
 
 import os
 
-DATA_SAVE_PATH = os.path.join("..", "saves", "data")
-FIGURE_SAVE_PATH = os.path.join("..", "saves", "figures")
-MODEL_SAVE_PATH = os.path.join("..", "saves", "models")
+DATA_SAVE_PATH = os.path.join("saves", "data")
+MODEL_SAVE_PATH = os.path.join("saves", "models")
 
 # Create missing directories
-for path in [DATA_SAVE_PATH, FIGURE_SAVE_PATH, MODEL_SAVE_PATH]:
+for path in [DATA_SAVE_PATH, MODEL_SAVE_PATH]:
     if not os.path.isdir(path):
         os.mkdir(path)
 
