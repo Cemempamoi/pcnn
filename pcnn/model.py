@@ -30,7 +30,7 @@ class Model:
     def __init__(self, data: pd.DataFrame, interval: int, model_kwargs: dict, inputs_D: list, 
                 module, rooms, case_column, out_column, neigh_column, temperature_column, power_column,
                 Y_columns: list, X_columns: list = None, topology: dict = None, load_last: bool = False,
-                load: bool = True):
+                load: bool = True, device: str = None):
         """
         Initialize a model.
 
@@ -131,12 +131,18 @@ class Model:
         print("Inputs used in D:\n", np.array(self.dataset.X_columns)[inputs_D])
 
         # To use the GPU when available
-        if torch.cuda.is_available():
-            self.device = torch.device("cuda:0")
-            print("\nGPU acceleration on!")
+        if device is None:
+            if torch.cuda.is_available():
+                self.device = torch.device("cuda:0")
+                print("\nGPU acceleration on!")
+            elif torch.backends.mps.is_available():
+                self.device = 'mps'
+                print("Using mps.")
+            else:
+                self.device = "cpu"
+                self.save_path = model_kwargs["save_path"]
         else:
-            self.device = "cpu"
-            self.save_path = model_kwargs["save_path"]
+            self.device = device
 
         # Compute the scaled zero power points and the division factors to use in ResNet-like
         # modules
@@ -372,7 +378,7 @@ class Model:
             # Check the existence of the model
             assert os.path.exists(name), f"The file {name} doesn't exist."
             # Load the checkpoint
-            checkpoint = torch.load(name)
+            checkpoint = torch.load(name, weights_only=False)
             # Put it into the model
             heating_sequences = checkpoint["heating_sequences"]
             cooling_sequences = checkpoint["cooling_sequences"]
@@ -470,13 +476,13 @@ class Model:
 
         # Scale the zero
         if self.dataset.is_normalized:
-            min_ = self.dataset.min_[self.power_column]
-            max_ = self.dataset.max_[self.power_column]
+            min_ = self.dataset.min_.iloc[self.power_column]
+            max_ = self.dataset.max_.iloc[self.power_column]
             zero = 0.8 * (0.0 - min_) / (max_ - min_) + 0.1
 
         elif self.dataset.is_standardized:
-            mean = self.dataset.mean[self.power_column]
-            std = self.dataset.std[self.power_column]
+            mean = self.dataset.mean.iloc[self.power_column]
+            std = self.dataset.std.iloc[self.power_column]
             zero = (0.0 - mean) / std
 
         else:
@@ -500,49 +506,49 @@ class Model:
 
         if self.unit == 'DFAB':
             # DFAB power is in kW
-            parameter_scalings['b'] = [1 / (2 / (self.dataset.max_ - self.dataset.min_)[self.temperature_column]
+            parameter_scalings['b'] = [1 / (2 / (self.dataset.max_ - self.dataset.min_).iloc[self.temperature_column]
                                            * 0.8 / 25 / 6 / 60 * self.dataset.interval).mean()]
-            parameter_scalings['c'] = [1 / (2.5 / (self.dataset.max_ - self.dataset.min_)[self.temperature_column]
+            parameter_scalings['c'] = [1 / (2.5 / (self.dataset.max_ - self.dataset.min_).iloc[self.temperature_column]
                                            * 0.8 / 25 / 6 / 60 * self.dataset.interval).mean() / 10]
 
             parameter_scalings['a'] = [
-                1 / (1 / (self.dataset.max_ - self.dataset.min_)[self.temperature_column[i]] * 0.8  # Gain 2 degrees
-                     / (self.dataset.max_['Thermal total power'] / (self.dataset.max_ - self.dataset.min_)[
+                1 / (1 / (self.dataset.max_ - self.dataset.min_).iloc[self.temperature_column[i]] * 0.8  # Gain 2 degrees
+                     / (self.dataset.max_['Thermal total power'] / (self.dataset.max_ - self.dataset.min_).iloc[
                             'Thermal total power'] * 0.8)  # With average power of 1500 W
                      / (10 * 60 / self.dataset.interval)) for i in range(len(self.rooms))]  # In 4h
             parameter_scalings['d'] = [
-                1 / (1 / (self.dataset.max_ - self.dataset.min_)[self.temperature_column[i]] * 0.8  # Gain 2 degrees
-                     / (- self.dataset.min_['Thermal total power'] / (self.dataset.max_ - self.dataset.min_)[
+                1 / (1 / (self.dataset.max_ - self.dataset.min_).iloc[self.temperature_column[i]] * 0.8  # Gain 2 degrees
+                     / (- self.dataset.min_['Thermal total power'] / (self.dataset.max_ - self.dataset.min_).iloc[
                             'Thermal total power'] * 0.8)  # With average power of 1000 W
                      / (10 * 60 / self.dataset.interval)) for i in range(len(self.rooms))]  # In 4h
 
         else:
-            parameter_scalings['b'] = [1 / (1.5 / (self.dataset.max_ - self.dataset.min_)[self.temperature_column]
+            parameter_scalings['b'] = [1 / (1.5 / (self.dataset.max_ - self.dataset.min_).iloc[self.temperature_column]
                                            * 0.8 / 25 / 6 / 60 * self.dataset.interval).mean()]
-            parameter_scalings['c'] = [1 / (1.5 / (self.dataset.max_ - self.dataset.min_)[self.temperature_column]
+            parameter_scalings['c'] = [1 / (1.5 / (self.dataset.max_ - self.dataset.min_).iloc[self.temperature_column]
                                            * 0.8 / 25 / 6 / 60 * self.dataset.interval).mean() / 10]
 
             # needed condition to make sure to deal with data in Watts and kWs
-            if (self.dataset.max_ - self.dataset.min_)[self.power_column[0]] > 100:
+            if (self.dataset.max_ - self.dataset.min_).iloc[self.power_column[0]] > 100:
                 parameter_scalings['a'] = [
-                    1 / (2 / (self.dataset.max_ - self.dataset.min_)[self.temperature_column[i]] * 0.8  # Gain 2 degrees
-                         / (1000 / (self.dataset.max_ - self.dataset.min_)[
+                    1 / (2 / (self.dataset.max_ - self.dataset.min_).iloc[self.temperature_column[i]] * 0.8  # Gain 2 degrees
+                         / (1000 / (self.dataset.max_ - self.dataset.min_).iloc[
                                 self.power_column[i]] * 0.8)  # With average power of 1.5 kW
                          / (4 * 60 / self.dataset.interval)) for i in range(len(self.rooms))] # in 4h
                 parameter_scalings['d'] = [
-                    1 / (2 / (self.dataset.max_ - self.dataset.min_)[self.temperature_column[i]] * 0.8  # Gain 2 degrees
-                         / (1000 / (self.dataset.max_ - self.dataset.min_)[
+                    1 / (2 / (self.dataset.max_ - self.dataset.min_).iloc[self.temperature_column[i]] * 0.8  # Gain 2 degrees
+                         / (1000 / (self.dataset.max_ - self.dataset.min_).iloc[
                                 self.power_column[i]] * 0.8)  # With average power of 1.5 kW
                          / (4 * 60 / self.dataset.interval)) for i in range(len(self.rooms))] # in 4h
             else:
                 parameter_scalings['a'] = [
-                    1 / (2 / (self.dataset.max_ - self.dataset.min_)[self.temperature_column[i]] * 0.8  # Gain 2 degrees
-                         / (self.dataset.max_[self.power_column[i]] * 3/2 / (self.dataset.max_ - self.dataset.min_)[
+                    1 / (2 / (self.dataset.max_ - self.dataset.min_).iloc[self.temperature_column[i]] * 0.8  # Gain 2 degrees
+                         / (self.dataset.max_.iloc[self.power_column[i]] * 3/2 / (self.dataset.max_ - self.dataset.min_).iloc[
                                 self.power_column[i]] * 0.8)  # With average power of 1.5 kW
                          / (4 * 60 / self.dataset.interval)) for i in range(len(self.rooms))]  # in 4h
                 parameter_scalings['d'] = [
-                    1 / (2 / (self.dataset.max_ - self.dataset.min_)[self.temperature_column[i]] * 0.8  # Gain 2 degrees
-                         / (self.dataset.max_[self.power_column[i]] * 3/2 / (self.dataset.max_ - self.dataset.min_)[
+                    1 / (2 / (self.dataset.max_ - self.dataset.min_).iloc[self.temperature_column[i]] * 0.8  # Gain 2 degrees
+                         / (self.dataset.max_.iloc[self.power_column[i]] * 3/2 / (self.dataset.max_ - self.dataset.min_).iloc[
                                 self.power_column[i]] * 0.8)  # With average power of 1.5 kW
                          / (4 * 60 / self.dataset.interval)) for i in range(len(self.rooms))]  # in 4h
 
@@ -555,13 +561,13 @@ class Model:
         This is used by the physics-inspired network to unnormalize the predictions.
         """
         normalization_variables = {}
-        normalization_variables['Room'] = [torch.Tensor(self.dataset.min_[self.temperature_column].values).to(self.device),
-                                           torch.Tensor((self.dataset.max_ - self.dataset.min_)[self.temperature_column].values).to(self.device)]
+        normalization_variables['Room'] = [torch.Tensor(self.dataset.min_.iloc[self.temperature_column].values).to(self.device),
+                                           torch.Tensor((self.dataset.max_ - self.dataset.min_).iloc[self.temperature_column].values).to(self.device)]
         if self.neigh_column is not None:
-            normalization_variables['Neigh'] = [torch.Tensor(self.dataset.min_[self.neigh_column].values).to(self.device),
-                                           torch.Tensor((self.dataset.max_ - self.dataset.min_)[self.neigh_column].values).to(self.device)]
-        normalization_variables['Out'] = [torch.Tensor([self.dataset.min_[self.out_column]]).to(self.device),
-                                          torch.Tensor([(self.dataset.max_ - self.dataset.min_)[self.out_column]]).to(self.device)]
+            normalization_variables['Neigh'] = [torch.Tensor(self.dataset.min_.iloc[self.neigh_column].values).to(self.device),
+                                           torch.Tensor((self.dataset.max_ - self.dataset.min_).iloc[self.neigh_column].values).to(self.device)]
+        normalization_variables['Out'] = [torch.Tensor([self.dataset.min_.iloc[self.out_column]]).to(self.device),
+                                          torch.Tensor([(self.dataset.max_ - self.dataset.min_).iloc[self.out_column]]).to(self.device)]
         return normalization_variables
 
     def batch_iterator(self, iterator_type: str = "train", batch_size: int = None, shuffle: bool = True) -> None:
@@ -1006,7 +1012,7 @@ class Model:
             assert os.path.exists(save_name), f"The file {save_name} doesn't exist."
 
             # Load the checkpoint
-            checkpoint = torch.load(save_name, map_location=lambda storage, loc: storage)
+            checkpoint = torch.load(save_name, map_location=lambda storage, loc: storage, weights_only=False)
 
             # Put it into the model
             self.model.load_state_dict(checkpoint["model_state_dict"])

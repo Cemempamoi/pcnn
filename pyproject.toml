@@ -2,18 +2,18 @@
 name = "pcnn"
 version = "0.1.0"
 description = ""
-authors = ["Loris Di Natale <loris.dinatale@empa.ch>"]
+authors = ["Loris Di Natale <loris.dinatale@netplus.ch>"]
 readme = "README.md"
+packages = [{include = "pcnn"}]
 
 [tool.poetry.dependencies]
 python = "^3.10"
-numpy = "^1.24.1"
-torch = "==1.12.1"
-pandas = "^1.5.2"
-matplotlib = "^3.6.2"
-jupyter = "^1.0.0"
-lab = "^7.2"
-jupyterlab = "^3.4.8"
+torch = "^2.6.0"
+numpy = "^2.2.2"
+
+[tool.poetry.group.dev.dependencies]
+pandas = "^2.2.3"
+matplotlib = "^3.10.0"
 
 [build-system]
 requires = ["poetry-core"]

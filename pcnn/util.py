@@ -106,6 +106,8 @@ def normalize(data: pd.DataFrame):
         the normalized data, the mins and the maxs
     """
 
+    data = data.astype(float)
+
     # Define and save the min and max of each column
     max_ = data.max()
     min_ = data.min()
@@ -118,7 +120,7 @@ def normalize(data: pd.DataFrame):
         print(f"Warning, columns {data.columns[np.where(max_ - min_ < 1e-10)[0]].values} are constant, really useful?")
 
     # Scale the data between 0.1 and 0.9
-    data.iloc[:, non_zero_div] = 0.8 * (data.iloc[:, non_zero_div] - min_[non_zero_div]) / (max_[non_zero_div] - min_[non_zero_div]) + 0.1
+    data.iloc[:, non_zero_div] = 0.8 * (data.iloc[:, non_zero_div] - min_.iloc[non_zero_div]) / (max_.iloc[non_zero_div] - min_.iloc[non_zero_div]) + 0.1
 
     data.iloc[:, np.where(max_ - min_ <= 1e-10)[0]] = 0.5
 
@@ -157,8 +159,8 @@ def inverse_normalize(data: Union[np.ndarray, pd.DataFrame, float], min_: Union[
         # If the given data is a DataFrame
         elif isinstance(data, pd.DataFrame):
             # Can get back to the original scale back
-            data.iloc[:, non_zero_div] = (data.iloc[:, non_zero_div] - 0.1).multiply(max_[non_zero_div] - min_[non_zero_div]) / 0.8
-            data.iloc[:, non_zero_div] = data.iloc[:, non_zero_div].add(min_[non_zero_div])
+            data.iloc[:, non_zero_div] = (data.iloc[:, non_zero_div] - 0.1).multiply(max_.iloc[non_zero_div] - min_.iloc[non_zero_div]) / 0.8
+            data.iloc[:, non_zero_div] = data.iloc[:, non_zero_div].add(min_.iloc[non_zero_div])
 
         else:
             raise ValueError(f"Unexpected data type {type(data)}")

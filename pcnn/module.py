@@ -1003,7 +1003,7 @@ class LSTM(nn.Module):
         self.output_nn_hidden_sizes = output_nn_hidden_sizes
         self.temperature_column = temperature_column
         self.power_columns = power_column
-        self.division_factor = torch.Tensor(division_factor)
+        self.division_factor = torch.Tensor(division_factor).to(self.device)
 
         # Define latent variables
         self.last = None  
