@@ -309,7 +309,7 @@ class PCNN(nn.Module):
         # Final computation of the result 'T=D+E'
         output = D + E
         # Trick needed since some sequences are padded
-        output[torch.where(x[:, -1, 0] < 1e-6)[0], :] = 0.
+        output[torch.where(x[:, -1, self.case_column] < 1e-6)[0], :] = 0.
         # Return the predictions and states of the model
         return output, (h, c)
 
@@ -611,7 +611,7 @@ class S_PCNN(nn.Module):
         # Final computation of the result 'T=D+E'
         output = D + E
         # Trick needed since some sequences are padded
-        output[torch.where(x[:, -1, 0] < 1e-6)[0], :] = 0.
+        output[torch.where(x[:, -1, self.case_column] < 1e-6)[0], :] = 0.
 
         # Return the predictions and states of the model
         return output, (h, c)
@@ -934,7 +934,7 @@ class M_PCNN(nn.Module):
         # Final computation of the result 'T=D+E'
         output = D + E
         # Trick needed since some sequences are padded
-        output[torch.where(x[:, -1, 0] < 1e-6)[0], :] = 0.
+        output[torch.where(x[:, -1, self.case_column] < 1e-6)[0], :] = 0.
 
         # Return the predictions and states of the model
         return output, (h, c)
@@ -1127,7 +1127,7 @@ class LSTM(nn.Module):
         self.last = output.clone()
 
         # Trick needed since some sequences are padded
-        output[torch.where(x[:, -1, 0] < 1e-6)[0], :] = 0.
+        output[torch.where(x[:, -1, self.case_column] < 1e-6)[0], :] = 0.
 
         # Return the predictions and states of the model
         return output, (h, c)
