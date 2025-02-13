@@ -1,6 +1,6 @@
 [tool.poetry]
-name = "pcnn"
-version = "0.1.0"
+name = "pcnns"
+version = "0.1.1"
 description = ""
 authors = ["Loris Di Natale <loris.dinatale@netplus.ch>"]
 readme = "README.md"
