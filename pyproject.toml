@@ -10,10 +10,12 @@ packages = [{include = "pcnn"}]
 python = "^3.10"
 torch = "^2.6.0"
 numpy = "^2.2.2"
+loguru = "^0.7.3"
 
 [tool.poetry.group.dev.dependencies]
 pandas = "^2.2.3"
 matplotlib = "^3.10.0"
+ipykernel = "^6.29.5"
 
 [build-system]
 requires = ["poetry-core"]
