@@ -7,10 +7,9 @@ import pandas as pd
 import math
 import time
 from typing import Union
-
 import random
 import numpy as np
-import matplotlib.pyplot as plt
+from loguru import logger
 
 import torch
 from torch.nn.utils.rnn import pad_sequence
@@ -19,7 +18,7 @@ import torch.nn.functional as F
 
 from pcnn.module import PCNN, S_PCNN, M_PCNN, LSTM
 from pcnn.data import prepare_data
-from pcnn.util import model_save_name_factory, format_elapsed_time, inverse_normalize, inverse_standardize
+from pcnn.util import model_save_name_factory, format_elapsed_time, inverse_normalize, inverse_standardize, check_GPU_availability, elapsed_timer
 
 
 class Model:
@@ -118,29 +117,19 @@ class Model:
 
         # Sanity check
         if self.neigh_column is None:
-            print('\nSanity check of the columns:\n', [(w, [self.dataset.X_columns[i] for i in x]) 
-                    for w, x in zip(['Case', 'Room temp', 'Room power', 'Out temp'],
-                                    [[self.case_column], self.temperature_column, self.power_column,
-                                     [self.out_column]])])
+            logger.info(f'Sanity check of the columns:\n{[(w, [self.dataset.X_columns[i] for i in x]) 
+                                                          for w, x in zip(['Case', 'Room temp', 'Room power', 'Out temp'],
+                                    [[self.case_column], self.temperature_column, self.power_column, [self.out_column]])]}')
         else:
-            print('\nSanity check of the columns:\n', [(w, [self.dataset.X_columns[i] for i in x]) 
-                    for w, x in zip(['Case', 'Room temp', 'Room power', 'Out temp', 'Neigh temp'],
-                                    [[self.case_column], self.temperature_column, self.power_column,
-                                     [self.out_column], self.neigh_column])])
+            logger.info(f'Sanity check of the columns:\n{[(w, [self.dataset.X_columns[i] for i in x]) 
+                                                          for w, x in zip(['Case', 'Room temp', 'Room power', 'Out temp', 'Neigh temp'],
+                                    [[self.case_column], self.temperature_column, self.power_column, [self.out_column], self.neigh_column])]}')
 
-        print("Inputs used in D:\n", np.array(self.dataset.X_columns)[inputs_D])
+        logger.info(f"Inputs used in D:\n{np.array(self.dataset.X_columns)[inputs_D]}\n")
 
         # To use the GPU when available
         if device is None:
-            if torch.cuda.is_available():
-                self.device = torch.device("cuda:0")
-                print("\nGPU acceleration on!")
-            elif torch.backends.mps.is_available():
-                self.device = 'mps'
-                print("Using mps.")
-            else:
-                self.device = "cpu"
-                self.save_path = model_kwargs["save_path"]
+            self.device = check_GPU_availability()
         else:
             self.device = device
 
@@ -372,7 +361,7 @@ class Model:
             Y = self.Y
 
         if self.verbose > 0:
-            print("\nTrying to load the predictable sequences, where the data has no missing values...")
+            logger.info("Trying to load the predictable sequences, where the data has no missing values...")
 
         try:
             # Check the existence of the model
@@ -384,11 +373,11 @@ class Model:
             cooling_sequences = checkpoint["cooling_sequences"]
 
             if self.verbose > 0:
-                print("Found!")
+                logger.info("Found!")
 
         except AssertionError:
             if self.verbose > 0:
-                print("Nothing found, building the sequences...")
+                logger.info("Nothing found, building the sequences...")
 
             # Create the sequences
             if self.heating:
@@ -409,12 +398,12 @@ class Model:
             torch.save({"heating_sequences": heating_sequences, "cooling_sequences": cooling_sequences}, name)
 
         if self.verbose > 0:
-            print(f"Number of sequences for the model {self.name}: {len(heating_sequences)} heating sequences and " f"{len(cooling_sequences)} cooling sequences.")
+            logger.info(f"Number of sequences for the model {self.name}: {len(heating_sequences)} heating sequences and " f"{len(cooling_sequences)} cooling sequences.")
 
         # Return the sequences
         return heating_sequences, cooling_sequences
 
-    def train_test_validation_separation(self, validation_percentage: float = 0.2, test_percentage: float = 0.0) -> None:
+    def train_test_validation_separation(self, validation_percentage: float = 0.2, test_percentage: float = 0.1) -> None:
         """
         Function to separate the data into training and testing parts. The trick here is that
         the data is not actually split - this function actually defines the sequences of
@@ -433,10 +422,10 @@ class Model:
         # Sanity checks: the given inputs are given as percentage between 0 and 1
         if 1 <= validation_percentage <= 100:
             validation_percentage /= 100
-            print("The train-test-validation separation rescaled the validation_percentage between 0 and 1")
+            logger.info("The train-test-validation separation rescaled the validation_percentage between 0 and 1")
         if 1 <= test_percentage <= 100:
             test_percentage /= 100
-            print("The train-test-validation separation rescaled the test_percentage between 0 and 1")
+            logger.info("The train-test-validation separation rescaled the test_percentage between 0 and 1")
 
         # Prepare the lists
         self.train_sequences = []
@@ -444,7 +433,7 @@ class Model:
         self.test_sequences = []
 
         if self.verbose > 0:
-            print("Creating training, validation and testing data")
+            logger.info("Creating training, validation and testing data...")
 
         for sequences in [self.heating_sequences, self.cooling_sequences]:
             if len(sequences) > 0:
@@ -767,23 +756,25 @@ class Model:
 
         return predictions, true
 
-    def fit(self, n_epochs: int = None, print_each: int = 5) -> None:
+    def fit(self, n_epochs: int = None, number_sequences: int = None, print_each=1) -> None:
         """
         General function fitting a model for several epochs, training and evaluating it on the data.
 
         Args:
             n_epochs:         Number of epochs to fit the model, if None this takes the default number
                                 defined by the parameters
-            n_batches_print:  Control how many batches to print per epoch
 
         Returns:
             Nothing
         """
 
-        self.times.append(time.time())
-
+        if number_sequences is not None:
+            self.train_sequences = self.train_sequences[:number_sequences]
+            self.validation_sequences = self.validation_sequences[:number_sequences]
+            self.test_sequences = self.test_sequences[:number_sequences]
+        
         if self.verbose > 0:
-            print("\nTraining starts!")
+            logger.info(f"Training starts! {len(self.train_sequences)} train, {len(self.validation_sequences)} validation, and {len(self.test_sequences)} test sequences.\n")
 
         # If no special number of epochs is given, take the default one
         if n_epochs is None:
@@ -795,122 +786,125 @@ class Model:
         # Assess the number of epochs the model was already trained on to get nice prints
         trained_epochs = len(self.train_losses)
 
-        for epoch in range(trained_epochs, trained_epochs + n_epochs):
+        if self.verbose > 0:
+            print('Epoch\tTrain loss\tVal loss\tTest loss\tTime')
 
-            if self.verbose > 0:
-                print(f"\nTraining epoch {epoch + 1}...")
+        with elapsed_timer() as elapsed:
 
-            # Start the training, define a list to retain the training losses along the way
-            self.model.train()
-            train_losses = []
-            train_sizes = []
+            for epoch in range(trained_epochs, trained_epochs + n_epochs):
 
-            # Adjust the learning rate if wanted
-            if self.decrease_learning_rate:
-                self.adjust_learning_rate(epoch=epoch)
+                if (self.verbose > 0) and (epoch % print_each == 0):
+                    print(epoch, end='\t')
 
-            # Create training batches and run through them, using the batch_iterator function, which has to be defined
-            # independently for each subclass, as different types of data are handled differently
-            for num_batch, batch_sequences in enumerate(self.batch_iterator(iterator_type="train")):
-
-                # Compute the loss of the batch and store it
-                loss = self.compute_loss(batch_sequences)
-
-                # Compute the gradients and take one step using the optimizer
-                loss.backward()
-                #for p in self.model.named_parameters():
-                #    if (p[1].grad is not None):
-                #        print(p[0], ":", p[1].grad.norm())
-                self.optimizer.step()
-                self.optimizer.zero_grad()
-                train_losses.append(float(loss))
-                train_sizes.append(len(batch_sequences))
-
-                # Regularly print the current state of things
-                if (self.verbose > 1) & (num_batch % print_each == print_each - 1):
-                    print(f"Loss batch {num_batch + 1}: {float(loss):.2E}")
-
-            # Compute the average loss of the training epoch and print it
-            train_loss = sum([l*s for l,s in zip(train_losses, train_sizes)]) / sum(train_sizes)
-            print(f"Average training loss after {epoch + 1} epochs: {train_loss:.2E}")
-            self.train_losses.append(train_loss)
-
-            # Start the validation, again defining a list to recall the losses
-            if self.verbose > 0:
-                print(f"Validation epoch {epoch + 1}...")
-            validation_losses = []
-            _validation_losses = []
-            validation_sizes = []
-            _validation_sizes = []
-
-            # Create validation batches and run through them. Note that we use larger batches
-            # to accelerate it a bit, and there is no need to shuffle the indices
-            for num_batch, batch_sequences in enumerate(self.batch_iterator(iterator_type="validation", batch_size=2 * self.batch_size, shuffle=False)):
-
-                # Compute the loss, in the torch.no_grad setting: we don't need the model to
-                # compute and use gradients here, we are not training
-                if 'PiNN' not in self.name:
+                # Start the training, define a list to retain the training losses along the way
+                if epoch > 0:
+                    self.model.train()
+                else:
                     self.model.eval()
+                train_losses = []
+                train_sizes = []
+
+                # Adjust the learning rate if wanted
+                if self.decrease_learning_rate:
+                    self.adjust_learning_rate(epoch=epoch)
+
+                # Create training batches and run through them, using the batch_iterator function, which has to be defined
+                # independently for each subclass, as different types of data are handled differently
+                for num_batch, batch_sequences in enumerate(self.batch_iterator(iterator_type="train")):
+                    if epoch > 0:
+                        # Compute the loss of the batch and store it
+                        loss = self.compute_loss(batch_sequences)
+                        # Compute the gradients and take one step using the optimizer
+                        loss.backward()
+                        self.optimizer.step()
+                        self.optimizer.zero_grad()
+                        train_losses.append(float(loss))
+                        train_sizes.append(len(batch_sequences))
+                    else:
+                        # Compute the loss, in the torch.no_grad setting: we don't need the model to
+                        # compute and use gradients here, we are not training                        
+                        with torch.no_grad():
+                            loss = self.compute_loss(batch_sequences)
+                            train_losses.append(float(loss))
+                            train_sizes.append(len(batch_sequences))
+
+                # Compute the average loss of the training epoch and print it
+                train_loss = sum([l*s for l,s in zip(train_losses, train_sizes)]) / sum(train_sizes)
+                if (self.verbose > 0) and (epoch % print_each == 0):
+                    print(f'{train_loss:.2E}', end='\t')
+                self.train_losses.append(train_loss)
+
+                # Start the validation, again defining a list to recall the losses
+                self.model.eval()
+                validation_losses = []
+                validation_sizes = []
+
+                # Create validation batches and run through them. Note that we use larger batches
+                # to accelerate it a bit, and there is no need to shuffle the indices
+                for num_batch, batch_sequences in enumerate(self.batch_iterator(iterator_type="validation", batch_size=2 * self.batch_size, shuffle=False)):
+
+                    # Compute the loss, in the torch.no_grad setting: we don't need the model to
+                    # compute and use gradients here, we are not training                        
                     with torch.no_grad():
                         loss = self.compute_loss(batch_sequences)
                         validation_losses.append(float(loss))
                         validation_sizes.append(len(batch_sequences))
-                        # Regularly print the current state of things
-                        if (self.verbose > 1) & (num_batch % (print_each//2) == (print_each//2) - 1):
-                            print(f"Loss batch {num_batch + 1}: {float(loss):.2E}")
 
-                else:
-                    self.model.train()
-                    loss = self.compute_loss(batch_sequences)
-                    validation_losses.append(float(loss))
-                    validation_sizes.append(len(batch_sequences))
-                    # Regularly print the current state of things
-                    if (self.verbose > 1) & (num_batch % (print_each//2) == (print_each//2) - 1):
-                        print(f"Loss batch {num_batch + 1}: {float(loss):.2E}")
-                    self.model.eval()
+                # Compute the average validation loss of the epoch and print it
+                validation_loss = sum([l*s for l,s in zip(validation_losses, train_sizes)]) / sum(validation_sizes)
+                self.validation_losses.append(validation_loss)
+                if (self.verbose > 0) and (epoch % print_each == 0):
+                    print(f'{validation_loss:.2E}', end='\t')
+
+                # Start the test, again defining a list to recall the losses
+                test_losses = []
+                test_sizes = []
+
+                # Create validation batches and run through them. Note that we use larger batches
+                # to accelerate it a bit, and there is no need to shuffle the indices
+                for num_batch, batch_sequences in enumerate(self.batch_iterator(iterator_type="test", batch_size=2 * self.batch_size, shuffle=False)):
+
+                    # Compute the loss, in the torch.no_grad setting: we don't need the model to
+                    # compute and use gradients here, we are not training
                     with torch.no_grad():
-                        loss = self._compute_loss(batch_sequences)
-                        _validation_losses.append(float(loss))
-                        _validation_sizes.append(len(batch_sequences))
-                        # Regularly print the current state of things
-                        if (self.verbose > 1) & (num_batch % (print_each//2) == (print_each//2) - 1):
-                            print(f"Loss batch {num_batch + 1}: {float(loss):.2E}")
+                        loss = self.compute_loss(sequences=batch_sequences)
+                        test_losses.append(float(loss))
+                        test_sizes.append(len(batch_sequences))
+                
+                # Compute the average test loss of the epoch and print it
+                test_loss = sum([l*s for l,s in zip(test_losses, test_sizes)]) / sum(test_sizes)
+                self.test_losses.append(test_loss)
+                if (self.verbose > 0) and (epoch % print_each == 0):
+                    print(f'{test_loss:.2E}', end='\t')
 
-            # Compute the average validation loss of the epoch and print it
-            validation_loss = sum([l*s for l,s in zip(validation_losses, train_sizes)]) / sum(validation_sizes)
-            self.validation_losses.append(validation_loss)
-            print(f"Average validation loss after {epoch + 1} epochs: {validation_loss:.2E}")
+               # Timing information
+                self.times.append(elapsed())
+                if (self.verbose > 0) and (epoch % print_each == 0):
+                    print(f'{format_elapsed_time(0, self.times[-1])}', end='\t' if (validation_loss < best_loss) and (epoch > 0) else '\n')
 
-            if 'PiNN' in self.name:
-                _validation_loss = sum([l*s for l,s in zip(_validation_losses, train_sizes)]) / sum(_validation_sizes)
-                self._validation_losses.append(_validation_loss)
-                if self.verbose > 0:
-                    print(f"Average accuracy validation loss after {epoch + 1} epochs: {_validation_loss:.2E}")
+                # Save parameters
+                if 'PCNN' in self.module:
+                    p = self.model.E_parameters
+                    self.a.append(p[0])
+                    self.b.append(p[1])
+                    self.c.append(p[2])
+                    self.d.append(p[3])
 
-            # Timing information
-            self.times.append(time.time())
+                # Save last and possibly best model
+                self.save(name_to_add="last", verbose=0)
+
+                if validation_loss < best_loss:
+                    self.save(name_to_add="best", verbose=1 if epoch > 0 else 0)
+                    best_loss = validation_loss
+
             if self.verbose > 0:
-                print(f"Time elapsed for the epoch: {format_elapsed_time(self.times[-2], self.times[-1])}"
-                      f" - for a total training time of {format_elapsed_time(self.times[0], self.times[-1])}")
+                time.sleep(0.7) # For clean printing, let the last test losses be printed before going ahead
+                best_epoch = np.argmin([x for x in self.validation_losses])
+                logger.info(f"The best model was obtained at epoch {best_epoch + 1} after training for " f"{trained_epochs + n_epochs} epochs in {format_elapsed_time(0, self.times[-1])}")
+                logger.info(f"Train loss:\t{self.train_losses[best_epoch]:.2E}")
+                logger.info(f"Val loss:\t{self.validation_losses[best_epoch]:.2E}")
+                logger.info(f"Test loss:\t{self.test_losses[best_epoch]:.2E}")
 
-            # Save parameters
-            if 'PCNN' in self.module:
-                p = self.model.E_parameters
-                self.a.append(p[0])
-                self.b.append(p[1])
-                self.c.append(p[2])
-                self.d.append(p[3])
-
-            # Save last and possibly best model
-            self.save(name_to_add="last", verbose=0)
-
-            if validation_loss < best_loss:
-                self.save(name_to_add="best", verbose=1)
-                best_loss = validation_loss
-
-        if self.verbose > 0:
-            best_epoch = np.argmin([x for x in self.validation_losses])
-            print(f"\nThe best model was obtained at epoch {best_epoch + 1} after training for " f"{trained_epochs + n_epochs} epochs")
 
     def adjust_learning_rate(self, epoch: int) -> None:
         """
@@ -953,7 +947,7 @@ class Model:
         """
 
         if verbose > 0:
-            print(f"\nSaving the new {name_to_add} model!")
+            print(f'\tNew {name_to_add}!')
 
         if name_to_add is not None:
             save_name = os.path.join(self.save_name, f"{name_to_add}_model.pt")
@@ -1005,7 +999,7 @@ class Model:
             save_name = os.path.join(self.save_name, "best_model.pt")
 
         if self.verbose > 0:
-            print("\nTrying to load a trained model...")
+            logger.info("Trying to load a trained model...")
         try:
             # Build the full path to the model and check its existence
 
@@ -1043,11 +1037,15 @@ class Model:
 
             # Print the current status of the found model
             if self.verbose > 0:
-                print(f"Found!\nThe model has been fitted for {len(self.train_losses)} epochs already, "
-                      f"with loss {np.min(self.validation_losses): .5f}.")
-                print(f"It contains {len(self.train_sequences)} training sequences and "
-                      f"{len(self.validation_sequences)} validation sequences.\n")
+                logger.info(f"Found! It contains {len(self.train_sequences)} training, {len(self.validation_sequences)} validation, and {len(self.test_sequences)} test sequences.")
+                if load_last:
+                    logger.info(f"The model has been fitted for {len(self.train_losses)} epochs already. Last checkpoint:")
+                else:
+                    logger.info(f"The model achieved its best performance after {len(self.train_losses)} epochs:")
+                logger.info(f"Train loss:\t{self.train_losses[-1]:.2E}")
+                logger.info(f"Val loss:\t{self.validation_losses[-1]:.2E}")
+                logger.info(f"Test loss:\t{self.test_losses[-1]:.2E}")
 
         # Otherwise, keep an empty model, return nothing
         except AssertionError:
-            print("\nNo existing model was found!\n")
+            logger.info("No existing model was found!")

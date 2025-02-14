@@ -2,8 +2,13 @@ import os
 import pandas as pd
 import numpy as np
 from typing import Union
+from loguru import logger
+import torch
+from contextlib import contextmanager
+from timeit import default_timer
 
 from pcnn.parameters import DATA_SAVE_PATH
+
 
 def load_data(save_name: str, save_path: str = DATA_SAVE_PATH) -> pd.DataFrame:
     """
@@ -242,3 +247,23 @@ def load_data(save_name: str, save_path: str = DATA_SAVE_PATH) -> pd.DataFrame:
     data.index = pd.to_datetime(data.index)
 
     return data
+
+def check_GPU_availability():
+    if torch.cuda.is_available():
+        device = torch.device("cuda:0")
+        logger.info("GPU acceleration on!")
+    elif torch.backends.mps.is_available():
+        device = 'mps'
+        logger.info("Using mps.")
+    else:
+        device = "cpu"
+        logger.info("Using CPU.")
+    return device
+
+@contextmanager
+def elapsed_timer():
+    start = default_timer()
+    elapser = lambda: default_timer() - start
+    yield lambda: elapser()
+    end = default_timer()
+    elapser = lambda: end-start

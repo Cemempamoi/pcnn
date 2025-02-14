@@ -1,3 +1,4 @@
+from loguru import logger
 import pandas as pd
 from pcnn.util import standardize, inverse_standardize, normalize, inverse_normalize
 
@@ -201,7 +202,7 @@ def prepare_data(data: pd.DataFrame, interval: int, model_kwargs: dict, Y_column
                         to_standardize=model_kwargs['to_standardize'])
 
     if verbose > 0:
-        print("\nPreparing the data...")
+        logger.info("Preparing the data...")
 
     # Reorder the columns to ensure they are in the right order
     dataset.X_columns = [x for x in dataset.data.columns if x in X_columns]
@@ -215,13 +216,13 @@ def prepare_data(data: pd.DataFrame, interval: int, model_kwargs: dict, Y_column
     # If standardization is wanted
     if dataset.to_standardize:
         if verbose > 0:
-            print("Standardizing the data...")
+            logger.info("Standardizing the data...")
         dataset.standardize()
 
     # Else, normalization is usually done
     elif dataset.to_normalize:
         if verbose > 0:
-            print("Normalizing the data...")
+            logger.info("Normalizing the data...")
         dataset.normalize()
 
     # Define inputs and labels
@@ -231,10 +232,10 @@ def prepare_data(data: pd.DataFrame, interval: int, model_kwargs: dict, Y_column
         dataset.X = dataset.data.iloc[:-1, :].copy().values
     dataset.Y = dataset.data[dataset.Y_columns].iloc[1:, :].copy().values
 
-    assert len(dataset.X) == len(dataset.Y), "Something weird happened"
+    assert len(dataset.X) == len(dataset.Y), "Something weird happened!"
 
     # Print the result and return it
     if verbose > 0:
-        print("Data ready!")
+        logger.info("Data ready!\n")
 
     return dataset
