@@ -180,7 +180,6 @@ def model_save_name_factory(module, model_kwargs):
     some hyperparameters' choices
 
     Args:
-        rooms:          List of rooms modeled
         module:         Module used in the model
         model_kwargs:   Parameters of the model, see 'parameters.py'
 
