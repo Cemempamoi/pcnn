@@ -57,7 +57,7 @@ class Model:
         # Fix the seeds for reproduction
         self._fix_seeds(seed=model_kwargs["seed"])
 
-        self.case_column = case_column
+        self.case_column = case_column if isinstance(case_column, list) else [case_column]
         self.out_column = out_column
         if neigh_column is not None:
             self.neigh_column = neigh_column if isinstance(neigh_column, list) else [neigh_column]
@@ -119,11 +119,11 @@ class Model:
         if self.neigh_column is None:
             logger.info(f'Sanity check of the columns:\n{[(w, [self.dataset.X_columns[i] for i in x]) 
                                                           for w, x in zip(['Case', 'Room temp', 'Room power', 'Out temp'],
-                                    [[self.case_column], self.temperature_column, self.power_column, [self.out_column]])]}')
+                                    [self.case_column, self.temperature_column, self.power_column, [self.out_column]])]}')
         else:
             logger.info(f'Sanity check of the columns:\n{[(w, [self.dataset.X_columns[i] for i in x]) 
                                                           for w, x in zip(['Case', 'Room temp', 'Room power', 'Out temp', 'Neigh temp'],
-                                    [[self.case_column], self.temperature_column, self.power_column, [self.out_column], self.neigh_column])]}')
+                                    [self.case_column, self.temperature_column, self.power_column, [self.out_column], self.neigh_column])]}')
 
         logger.info(f"Inputs used in D:\n{np.array(self.dataset.X_columns)[inputs_D]}\n")
 
