@@ -49,7 +49,7 @@ class Model:
         self.rooms = rooms if isinstance(rooms, list) else [rooms]
 
         # Create the name associated to the model
-        self.save_name = model_save_name_factory(rooms=self.rooms, module=module, model_kwargs=model_kwargs)
+        self.save_name = model_save_name_factory(module=module, model_kwargs=model_kwargs)
 
         if not os.path.isdir(self.save_name):
             os.mkdir(self.save_name)

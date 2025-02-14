@@ -172,7 +172,7 @@ def inverse_normalize(data: Union[np.ndarray, pd.DataFrame, float], min_: Union[
 
     return data
 
-def model_save_name_factory(rooms, module, model_kwargs):
+def model_save_name_factory(module, model_kwargs):
     """
     Function to create helpful and somewhat unique names to easily save and load the wanted models
     This uses the starting and ending date of the data used to fit the model, as well as another
@@ -188,11 +188,8 @@ def model_save_name_factory(rooms, module, model_kwargs):
         A full name to save the model as
     """
 
-    name = ''
-    for room in rooms:
-        name += f"{room}_"
     name = os.path.join(model_kwargs["save_path"], f"{model_kwargs['name']}_{model_kwargs['seed']}_"
-                                                   f"{module}_{name}_")
+                                                   f"{module}")
 
     name += f"_{model_kwargs['warm_start_length']}_{model_kwargs['maximum_sequence_length']}"
 
