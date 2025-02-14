@@ -146,10 +146,11 @@ class PCNN(nn.Module):
         """
 
         ## Initialization of the parameters of `E`
-        self.a = PositiveLinear(1, 1, require_bias=False)
+        self.a = PositiveLinear(len(self.power_column), 1, require_bias=False)
         self.b = PositiveLinear(1, 1, require_bias=False)
-        self.c = PositiveLinear(1, 1, require_bias=False)
-        self.d = PositiveLinear(1, 1, require_bias=False)
+        if self.neigh_column is not None:
+            self.c = PositiveLinear(len(self.neigh_column), 1, require_bias=False)
+        self.d = PositiveLinear(len(self.power_column), 1, require_bias=False)
 
         ## Initialization of `D`
         # Hidden and cell state initialization
@@ -271,36 +272,37 @@ class PCNN(nn.Module):
                     * self.out_diff + self.out_min)) / self.b_scaling
 
         # Loss to the neighboring zone is c*(T_k-T^neigh_k)
-        for i in range(len(self.neigh_column)):
-            E = E.clone() - self.c(
-                (((x[:, -1, self.temperature_column]+ self.last_E.clone() - 0.1) / 0.8
-                  * self.room_diff + self.room_min)
-                - ((x[:, -1, [self.neigh_column[i]]] - 0.1) / 0.8
-                    * self.neigh_diff[i] + self.neigh_min[i]))) / self.c_scaling
+        E = E.clone() - self.c(
+            (((x[:, -1, self.temperature_column]+ self.last_E.clone() - 0.1) / 0.8
+                * self.room_diff + self.room_min)
+            - ((x[:, -1, self.neigh_column] - 0.1) / 0.8
+                * self.neigh_diff + self.neigh_min))) / self.c_scaling
 
         ## Heating/cooling effect of HVAC on 'E'
 
         # Find sequences in the batch where there actually is heating/cooling
         # Trick needed to put padded values back to zero power before detecting power intputs
         temp = torch.where(x[:, :, self.power_column] > 0.05, x[:, :, self.power_column], self.zero_power)
-        mask = torch.where(torch.abs(temp - self.zero_power) > 1e-6, True, False).squeeze(1)
+        mask = torch.any(torch.any(torch.where(torch.abs(temp - self.zero_power) > 1e-6, True, False), axis=1), axis=1)
 
         if sum(mask) > 0:
 
             # Find heating and cooling sequences
-            heating = x[:, 0, [self.case_column]] > 0.5
-            cooling = x[:, 0, [self.case_column]] < 0.5
+            heating = torch.any(x[:, 0, self.case_column] > 0.5, axis=1)
+            cooling = torch.any(x[:, 0, self.case_column] < 0.5, axis=1)
 
             # Substract the 'zero power' to get negative values for cooling power
-            power = x[:, -1, self.power_column].clone() - self.zero_power
+            power = x[:, :, self.power_column].clone() - self.zero_power
 
             if sum(heating) > 0:
-                # Heating effect: add a*u to 'E'
-                E[mask & heating] = E[mask & heating].clone() + self.a(power[mask & heating].unsqueeze(-1)).squeeze(-1) / self.a_scaling
+                # Heating effect: add a*u to 'E'$
+                heating_power = torch.where(power > self.zero_power, power, self.zero_power)[mask&heating,:]
+                E[mask & heating] = E[mask & heating].clone() + self.a(heating_power).squeeze(-1) / self.a_scaling
 
             if sum(cooling) > 0:
                 # Cooling effect: add d*u (where u<0 now, so we actually subtract energy) to 'E'
-                E[mask & cooling] = E[mask & cooling].clone() + self.d(power[mask & cooling].unsqueeze(-1)).squeeze(-1) / self.d_scaling
+                cooling_power = torch.where(power < self.zero_power, power, self.zero_power)[mask&cooling,:]
+                E[mask & cooling] = E[mask & cooling].clone() + self.d(cooling_power).squeeze(-1) / self.d_scaling
 
         # Recall 'D' and 'E' for the next time step
         self.last_D = D.clone()
@@ -315,7 +317,7 @@ class PCNN(nn.Module):
 
     @property
     def E_parameters(self):
-        return [float(x._parameters['log_weight']) for x in [self.a, self.b, self.c, self.d]]
+        return [list(np.exp(x._parameters['log_weight'].cpu().detach().numpy())) for x in [self.a, self.b, self.c, self.d]]
 
 
 class S_PCNN(nn.Module):

@@ -382,14 +382,14 @@ class Model:
             # Create the sequences
             if self.heating:
                 X_ = X.copy()
-                X_[np.where(X_[:, self.case_column] < 0.5)[0]] = np.nan
+                X_[np.where(X_[:, self.case_column[0]] < 0.5)[0]] = np.nan
                 heating_sequences = self._create_sequences(X=X_, Y=Y)
             else:
                 heating_sequences = []
 
             if self.cooling:
                 X_ = X.copy()
-                X_[np.where(X_[:, self.case_column] > 0.5)[0]] = np.nan
+                X_[np.where(X_[:, self.case_column[0]] > 0.5)[0]] = np.nan
                 cooling_sequences = self._create_sequences(X=X_, Y=Y)
             else:
                 cooling_sequences = []
@@ -475,7 +475,7 @@ class Model:
             zero = (0.0 - mean) / std
 
         else:
-            zero = np.array([0.0] * len(self.rooms))
+            zero = np.array([0.0] * len(self.power_column))
 
         return np.array(zero)
 
