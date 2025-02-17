@@ -432,25 +432,38 @@ class Model:
         self.test_sequences = []
 
         if self.verbose > 0:
-            logger.info("Creating training, validation and testing data...")
+            logger.info("Creating training, validation and testing data...\n")
 
         for sequences in [self.heating_sequences, self.cooling_sequences]:
             if len(sequences) > 0:
-                # Given the total number of sequences, define aproximate separations between training
+                # Given the total number of sequences, define approximate separations between training
                 # validation and testing sets
                 train_validation_sep = int((1 - test_percentage - validation_percentage) * len(sequences))
                 validation_test_sep = int((1 - test_percentage) * len(sequences))
 
                 # Little trick to ensure training, validation and test sequences are completely distinct
                 while True:
-                    if (sequences[train_validation_sep - 1][1] < sequences[train_validation_sep][0]) | (train_validation_sep == 1):
+                    if (sequences[train_validation_sep - 1][1] < sequences[train_validation_sep][0]) | (train_validation_sep == 0):
                         break
                     train_validation_sep -= 1
-                if test_percentage > 0.:
-                    while True:
-                        if (sequences[validation_test_sep - 1][1] < sequences[validation_test_sep][0]) | (validation_test_sep == 1):
-                            break
-                        validation_test_sep -= 1
+
+                # Check if the training and validation sets are completely distinct
+                # If there is no missing data, the above code will fail to fully separate train and validation sequences
+                # In that casem fall back to the default threshold
+                if train_validation_sep == 0:
+                    logger.warning("Could not fully separate training and validation sequences, some data will overlap.")
+                    logger.info("This error arises if there is no missing data - to avoid it, remove a datapoint (set it to Nan) in the data where the seapration should be.\n")
+                    train_validation_sep = int((1 - test_percentage - validation_percentage) * len(sequences))
+
+                while True:
+                    if (sequences[validation_test_sep - 1][1] < sequences[validation_test_sep][0]) | (validation_test_sep == train_validation_sep):
+                        break
+                    validation_test_sep -= 1
+
+                if train_validation_sep == train_validation_sep:
+                    logger.warning("Could not fully separate validation and testing sequences, some data will overlap.")
+                    logger.info("This error arises if there is no missing data - to avoid it, remove a datapoint (set it to Nan) in the data where the seapration should be.\n")
+                    validation_test_sep = int((1 - test_percentage) * len(sequences))
 
                 # Prepare the lists
                 self.train_sequences += sequences[:train_validation_sep]
@@ -727,7 +740,6 @@ class Model:
             true_data = true_data.reshape(1, true_data.shape[0], -1)
 
         # Scale the data back
-        cols = self.dataset.Y_columns[:-1] if self.predict_power else self.dataset.Y_columns[:-2]
         truth = true_data.reshape(true_data.shape[0], true_data.shape[1], -1)
         true = np.zeros_like(predictions)
 

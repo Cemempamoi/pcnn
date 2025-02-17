@@ -130,7 +130,7 @@ def prepare_data(data: pd.DataFrame, interval: int, model_kwargs: dict, Y_column
         dataset.data.drop(columns=[x for x in dataset.data.columns if x not in to_keep], inplace=True)
 
     # If normalization is wanted
-    elif dataset.to_normalize:
+    if dataset.to_normalize:
         if verbose > 0:
             logger.info("Normalizing the data...")
         dataset.normalize()
