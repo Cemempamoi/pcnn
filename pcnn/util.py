@@ -29,83 +29,13 @@ def load_data(save_name: str, save_path: str = DATA_SAVE_PATH) -> pd.DataFrame:
 
     return data
 
-def standardize(data: pd.DataFrame):
-    """
-    function to standardize the columns of a DataFrame.
-
-    Args:
-        data: The DataFrame to standardize
-
-    Returns:
-        the standardized data, the means and the stds
-    """
-
-    # Define and keep the means and stds in memory
-    mean = data.mean()
-    std = data.std()
-
-    # Substract the mean
-    data = data.subtract(mean)
-
-    # Little trick to handle constant data (zero std --> cannot divide)
-    # Only consider non zero variance columns
-    non_zero_std = np.where(data.std().values > 1e-10)[0]
-    # If there is a zero variance column, it is actually useless since it is constant
-    if len(non_zero_std) < len(data.columns):
-        print(f"Warning, 0 std for columns {data.columns[np.where(data.std().values < 1e-10)[0]].values}, really useful?")
-
-    # Divide by the std where possible
-    data.iloc[:, non_zero_std] = data.iloc[:, non_zero_std].divide(std[non_zero_std])
-
-    return data, mean, std
-
-
-def inverse_standardize(data: pd.DataFrame, mean: pd.Series, std: pd.Series):
-    """
-    function to inverse the standardization of the columns of a DataFrame.
-
-    Args:
-        data:   The DataFrame to inverse standardize
-        mean:   The mean values of the columns
-        std:    The standard deviations of the columns
-
-    Returns:
-        The original data
-    """
-
-    # If the given data is a number
-    if isinstance(data, float):
-        # Can get back to the original scale back
-        data = mean + (data * std)
-
-    else:
-        # Get the places where the variance is not zero and multiply back
-        # (the other columns were ignored)
-        non_zero_std = np.where(std.values > 1e-10)[0]
-
-        # In the case of an array
-        if isinstance(data, np.ndarray):
-            data[:, non_zero_std] = data[:, non_zero_std] * std[non_zero_std].values.reshape(1, -1)
-            data += mean
-
-        # If the given data is an DataFrame
-        elif isinstance(data, pd.DataFrame):
-            data.iloc[:, non_zero_std] = data.iloc[:, non_zero_std].multiply(std[non_zero_std])
-            # Add the mean back
-            data = data.add(mean)
-
-        else:
-            raise ValueError(f"Unexpected data type {type(data)}")
-
-    return data
-
 
 def normalize(data: pd.DataFrame):
     """
     Function to normalize the columns of a DataFrame to 0.1-0.9
 
     Args:
-        data: The DataFrame to standardize
+        data: The DataFrame to normalize
 
     Returns:
         the normalized data, the mins and the maxs
@@ -137,7 +67,7 @@ def inverse_normalize(data: Union[np.ndarray, pd.DataFrame, float], min_: Union[
     Function to inverse the normalization of the columns of a DataFrame to 0.1-0.9
 
     Args:
-        data:   The DataFrame to inverse standardize
+        data:   The DataFrame to inverse normalize
         min_:   The min values of the columns
         max_:   The max values of the columns
 

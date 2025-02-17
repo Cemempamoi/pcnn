@@ -1,17 +1,15 @@
 from loguru import logger
 import pandas as pd
-from pcnn.util import standardize, inverse_standardize, normalize, inverse_normalize
+from pcnn.util import normalize, inverse_normalize
 
 class DataSet:
-    def __init__(self, data, interval, to_normalize, to_standardize) -> None:
+    def __init__(self, data, interval, to_normalize) -> None:
 
         self.data = data
         self.interval = interval
         self.to_normalize = to_normalize
-        self.to_standardize = to_standardize
 
         self.is_normalized = False
-        self.is_standardized = False
 
         self.X = None
         self.Y = None
@@ -19,86 +17,6 @@ class DataSet:
         self.max_ = None
         self.mean = None
         self.std = None
-
-    def standardize(self, data=None):
-        """
-        Function to standardize the dataset, i.e. put it to zero mean and 1 std
-        The mean and std of each column (sensor) is kept in memory to reverse the
-        operation and to be able to apply them to other datasets
-        """
-
-        inplace = False
-
-        # If no data is provided, take the entire data of the class instance
-        if data is None:
-            data = self.data
-
-            # First, check that no normalization or standardization was already performed
-            assert not self.is_normalized, "The data is already normalized!"
-            assert not self.is_standardized, "The data is already standardized!"
-
-            # Set the standardized flag to true
-            self.is_standardized = True
-            inplace = True
-
-        # Standardize the data, recall the mean and std
-        data, mean, std = standardize(data)
-
-        if inplace:
-            self.data = data
-            self.mean = mean
-            self.std = std
-        else:
-            return data, mean, std
-
-    def inverse_standardize(self, data=None, mean=None, std=None, inplace: bool = False):
-        """
-        Function to reverse the standardization to get the original scales back. If no data is provided,
-        the entire dataset is scaled back.
-
-        Args:
-            data:       Data to inverse standardize
-            mean:       Mean to use (takes the one of the dataset by default)
-            std:        Std to use (takes the one of the dataset by default)
-            inplace:    Flag to do the operation in place or not
-
-        Returns:
-            Standardized data if wanted
-        """
-
-        # First sanity check: the data is already standardized
-        assert self.is_standardized, "The data is not standardized!"
-
-        # If no data is provided, take the entire DataFrame of the DataSet
-        if data is None:
-            # First sanity check: the data is already normalized
-            assert self.is_normalized, "The data is not normalized!"
-            if inplace:
-                self.is_standardized = False
-                data_ = self.data
-            else:
-                data_ = self.data.copy()
-
-        # Otherwise, copy the data to avoid issues
-        else:
-            if type(data) == pd.Series:
-                data_ = pd.DataFrame(data=data, index=data.index, columns=[data.name])
-            else:
-                data_ = data.copy()
-
-        if mean is None:
-            mean = self.mean[data_.columns]
-        if std is None:
-            std = self.std[data_.columns]
-
-        # Inverse the standardization with the wanted means and stds
-        data = inverse_standardize(data=data_, mean=mean, std=std)
-
-        # Return the scaled data if wanted
-        if inplace:
-            self.data = data
-        else:
-            return data
 
     def normalize(self, data=None):
         """
@@ -117,10 +35,9 @@ class DataSet:
             data = self.data
 
             # First, check that no normalization or standardization was already performed
-            assert not self.is_standardized, "The data is already standardized!"
             assert not self.is_normalized, "The data is already normalized!"
 
-            # Set the standardized flag to true
+            # Set the normalized flag to true
             self.is_normalized = True
             inplace = True
 
@@ -198,8 +115,7 @@ def prepare_data(data: pd.DataFrame, interval: int, model_kwargs: dict, Y_column
     """
 
     # Use the custom function to load and prepare the full dataset from the NEST data
-    dataset = DataSet(data=data.copy(), interval=interval, to_normalize=model_kwargs['to_normalize'], 
-                        to_standardize=model_kwargs['to_standardize'])
+    dataset = DataSet(data=data.copy(), interval=interval, to_normalize=model_kwargs['to_normalize'])
 
     if verbose > 0:
         logger.info("Preparing the data...")
@@ -213,13 +129,7 @@ def prepare_data(data: pd.DataFrame, interval: int, model_kwargs: dict, Y_column
         to_keep = [x for x in dataset.data.columns if x in list(set(X_columns) | set(Y_columns))]
         dataset.data.drop(columns=[x for x in dataset.data.columns if x not in to_keep], inplace=True)
 
-    # If standardization is wanted
-    if dataset.to_standardize:
-        if verbose > 0:
-            logger.info("Standardizing the data...")
-        dataset.standardize()
-
-    # Else, normalization is usually done
+    # If normalization is wanted
     elif dataset.to_normalize:
         if verbose > 0:
             logger.info("Normalizing the data...")

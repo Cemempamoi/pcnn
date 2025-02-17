@@ -18,7 +18,7 @@ import torch.nn.functional as F
 
 from pcnn.module import PCNN, S_PCNN, M_PCNN, LSTM
 from pcnn.data import prepare_data
-from pcnn.util import model_save_name_factory, format_elapsed_time, inverse_normalize, inverse_standardize, check_GPU_availability, elapsed_timer
+from pcnn.util import model_save_name_factory, format_elapsed_time, inverse_normalize, check_GPU_availability, elapsed_timer
 
 
 class Model:
@@ -69,7 +69,6 @@ class Model:
         self.topology = topology
         self.module = module
 
-        self.unit = model_kwargs['unit']
         self.batch_size = model_kwargs["batch_size"]
         self.shuffle = model_kwargs["shuffle"]
         self.n_epochs = model_kwargs["n_epochs"]
@@ -469,11 +468,6 @@ class Model:
             max_ = self.dataset.max_.iloc[self.power_column]
             zero = 0.8 * (0.0 - min_) / (max_ - min_) + 0.1
 
-        elif self.dataset.is_standardized:
-            mean = self.dataset.mean.iloc[self.power_column]
-            std = self.dataset.std.iloc[self.power_column]
-            zero = (0.0 - mean) / std
-
         else:
             zero = np.array([0.0] * len(self.power_column))
 
@@ -745,14 +739,6 @@ class Model:
                 true[i, :, :] = inverse_normalize(data=truth[i, :, :],
                                                        min_=self.dataset.min_[self.dataset.Y_columns],
                                                        max_=self.dataset.max_[self.dataset.Y_columns])
-        elif self.dataset.is_standardized:
-            for i, sequence in enumerate(sequences):
-                predictions[i, :, :] = inverse_standardize(data=predictions[i, :, :],
-                                                           mean=self.dataset.mean[self.dataset.Y_columns],
-                                                           std=self.dataset.std[self.dataset.Y_columns])
-                true[i, :, :] = inverse_standardize(data=truth[i, :, :],
-                                                         mean=self.dataset.mean[self.dataset.Y_columns],
-                                                         std=self.dataset.std[self.dataset.Y_columns])
 
         return predictions, true
 

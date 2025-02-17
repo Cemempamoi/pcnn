@@ -15,8 +15,7 @@ for path in [DATA_SAVE_PATH, MODEL_SAVE_PATH]:
     if not os.path.isdir(path):
         os.mkdir(path)
 
-def parameters(unit: str = 'UMAR', to_normalize: bool = True,
-                to_standardize: bool = False,
+def parameters(to_normalize: bool = True,
                 name: str = "Default_model", save_path: str = MODEL_SAVE_PATH,
                 seed: int = 0, batch_size: int = 128, shuffle: bool = True, n_epochs: int = 20,
                 learning_rate: float = 0.05, decrease_learning_rate:bool = True,
@@ -62,9 +61,6 @@ def parameters(unit: str = 'UMAR', to_normalize: bool = True,
         verbose:                    Verbose of the models
     """
 
-    assert not (to_normalize and to_standardize), "Cannot normalize and standradize the data at the same time! " \
-                                                "Please put either 'to_normalize' or 'to_standardize' to False."
-
     assert cooling | heating, "At least heating or cooling needs to be true, otherwise nothing can be done"
 
     if feed_input_through_nn:
@@ -82,9 +78,7 @@ def parameters(unit: str = 'UMAR', to_normalize: bool = True,
     return dict(name=name,
                 save_path=save_path,
                 seed=seed,
-                unit=unit,
                 to_normalize=to_normalize,
-                to_standardize=to_standardize,
                 heating=heating,
                 cooling=cooling,
                 learn_initial_hidden_states=learn_initial_hidden_states,
