@@ -45,27 +45,7 @@ class PCNN(nn.Module):
     `D` and `E` are then carried on to the next step and updated.
     """
 
-    def __init__(
-            self,
-            device,
-            inputs_D: list,
-            learn_initial_hidden_states: bool,
-            feed_input_through_nn: bool,
-            input_nn_hidden_sizes: list,
-            lstm_hidden_size: int,
-            lstm_num_layers: int,
-            layer_norm: bool,
-            output_nn_hidden_sizes: list,
-            case_column: int,
-            temperature_column: int,
-            out_column: int,
-            neigh_column: int,
-            power_column: int,
-            zero_power: float,
-            division_factor: list,
-            normalization_variables: dict,
-            parameter_scalings: dict,
-    ):
+    def __init__(self, kwargs: dict):
         """
         Function to build the models.
 
@@ -98,40 +78,40 @@ class PCNN(nn.Module):
         super().__init__()
 
         # Recall the parameters for further use
-        self.device = device
-        self.inputs_D = inputs_D
-        self.learn_initial_hidden_states = learn_initial_hidden_states
-        self.feed_input_through_nn = feed_input_through_nn
-        self.input_nn_hidden_sizes = input_nn_hidden_sizes
-        self.lstm_hidden_size = lstm_hidden_size
-        self.lstm_num_layers = lstm_num_layers
-        self.layer_norm = layer_norm
-        self.output_nn_hidden_sizes = output_nn_hidden_sizes
-        self.case_column = case_column
-        self.temperature_column = temperature_column
-        self.power_column = power_column
-        self.out_column = out_column
-        self.neigh_column = neigh_column
-        self.zero_power = torch.Tensor(zero_power).to(self.device)
-        self.division_factor = torch.Tensor(division_factor).to(self.device)
+        self.device = kwargs['device']
+        self.inputs_D = kwargs['inputs_D']
+        self.learn_initial_hidden_states = kwargs['learn_initial_hidden_states']
+        self.feed_input_through_nn = kwargs['feed_input_through_nn']
+        self.input_nn_hidden_sizes = kwargs['input_nn_hidden_sizes']
+        self.lstm_hidden_size = kwargs['lstm_hidden_size']
+        self.lstm_num_layers = kwargs['lstm_num_layers']
+        self.layer_norm = kwargs['layer_norm']
+        self.output_nn_hidden_sizes = kwargs['output_nn_hidden_sizes']
+        self.case_column = kwargs['case_column']
+        self.temperature_column = kwargs['temperature_column']
+        self.power_column = kwargs['power_column']
+        self.out_column = kwargs['out_column']
+        self.neigh_column = kwargs['neigh_column']
+        self.zero_power = torch.Tensor(kwargs['zero_power']).to(self.device)
+        self.division_factor = torch.Tensor(kwargs['division_factor']).to(self.device)
 
         # Define latent variables
         self.last_D = None  ## D
         self.last_E = None  ## E
 
         # Recall normalization constants
-        self.room_min = normalization_variables['Room'][0]
-        self.room_diff = normalization_variables['Room'][1]
-        self.neigh_min = normalization_variables['Neigh'][0]
-        self.neigh_diff = normalization_variables['Neigh'][1]
-        self.out_min = normalization_variables['Out'][0]
-        self.out_diff = normalization_variables['Out'][1]
-
-        # Specific scalings for the physical parameters `a`, `b`, `c`, `d`
-        self.a_scaling = torch.Tensor(parameter_scalings['a']).to(self.device)
-        self.b_scaling = torch.Tensor(parameter_scalings['b']).to(self.device)
-        self.c_scaling = torch.Tensor(parameter_scalings['c']).to(self.device)
-        self.d_scaling = torch.Tensor(parameter_scalings['d']).to(self.device)
+        self.room_min = torch.Tensor(kwargs['normalization_variables']['Room'][0]).to(self.device)
+        self.room_diff = torch.Tensor(kwargs['normalization_variables']['Room'][1]).to(self.device)
+        self.neigh_min = torch.Tensor(kwargs['normalization_variables']['Neigh'][0]).to(self.device)
+        self.neigh_diff = torch.Tensor(kwargs['normalization_variables']['Neigh'][1]).to(self.device)
+        self.out_min = torch.Tensor(kwargs['normalization_variables']['Out'][0]).to(self.device)
+        self.out_diff = torch.Tensor(kwargs['normalization_variables']['Out'][1]).to(self.device)
+        
+        # Initial values for the physical parameters `a`, `b`, `c`, `d`
+        self.initial_value_a = torch.Tensor(kwargs['initial_values_physical_parameters']['a']).to(self.device)
+        self.initial_value_b = torch.Tensor(kwargs['initial_values_physical_parameters']['b']).to(self.device)
+        self.initial_value_c = torch.Tensor(kwargs['initial_values_physical_parameters']['c']).to(self.device)
+        self.initial_value_d = torch.Tensor(kwargs['initial_values_physical_parameters']['d']).to(self.device)
 
         # Build the models
         self._build_model()
@@ -269,14 +249,14 @@ class PCNN(nn.Module):
                 ((x[:, -1, self.temperature_column] + self.last_E.clone() - 0.1) / 0.8
                   * self.room_diff + self.room_min)
                  - ((x[:, -1, [self.out_column]] - 0.1) / 0.8
-                    * self.out_diff + self.out_min)) / self.b_scaling
+                    * self.out_diff + self.out_min)) * self.initial_value_b
 
         # Loss to the neighboring zone is c*(T_k-T^neigh_k)
         E = E.clone() - self.c(
             (((x[:, -1, self.temperature_column]+ self.last_E.clone() - 0.1) / 0.8
                 * self.room_diff + self.room_min)
             - ((x[:, -1, self.neigh_column] - 0.1) / 0.8
-                * self.neigh_diff + self.neigh_min))) / self.c_scaling
+                * self.neigh_diff + self.neigh_min))) * self.initial_value_c
 
         ## Heating/cooling effect of HVAC on 'E'
 
@@ -297,12 +277,12 @@ class PCNN(nn.Module):
             if sum(heating) > 0:
                 # Heating effect: add a*u to 'E'$
                 heating_power = torch.where(power > self.zero_power, power, self.zero_power)[mask&heating,:]
-                E[mask & heating] = E[mask & heating].clone() + self.a(heating_power).squeeze(-1) / self.a_scaling
+                E[mask & heating] = E[mask & heating].clone() + self.a(heating_power).squeeze(-1) * self.initial_value_a
 
             if sum(cooling) > 0:
                 # Cooling effect: add d*u (where u<0 now, so we actually subtract energy) to 'E'
                 cooling_power = torch.where(power < self.zero_power, power, self.zero_power)[mask&cooling,:]
-                E[mask & cooling] = E[mask & cooling].clone() + self.d(cooling_power).squeeze(-1) / self.d_scaling
+                E[mask & cooling] = E[mask & cooling].clone() + self.d(cooling_power).squeeze(-1) * self.initial_value_d
 
         # Recall 'D' and 'E' for the next time step
         self.last_D = D.clone()
@@ -338,27 +318,7 @@ class S_PCNN(nn.Module):
     `D` and `E` are then carried on to the next step and updated.
     """
 
-    def __init__(
-            self,
-            device,
-            inputs_D: list,
-            learn_initial_hidden_states: bool,
-            feed_input_through_nn: bool,
-            input_nn_hidden_sizes: list,
-            lstm_hidden_size: int,
-            lstm_num_layers: int,
-            layer_norm: bool,
-            output_nn_hidden_sizes: list,
-            case_column: int,
-            temperature_column: int,
-            out_column: int,
-            power_column: int,
-            zero_power: float,
-            division_factor: list,
-            normalization_variables: dict,
-            parameter_scalings: dict,
-            topology: dict,
-    ):
+    def __init__(self, kwargs: dict):
         """
         Function to build the models.
 
@@ -391,38 +351,38 @@ class S_PCNN(nn.Module):
         super().__init__()
 
         # Recall the parameters for further use
-        self.device = device
-        self.inputs_D = inputs_D
-        self.learn_initial_hidden_states = learn_initial_hidden_states
-        self.feed_input_through_nn = feed_input_through_nn
-        self.input_nn_hidden_sizes = input_nn_hidden_sizes
-        self.lstm_hidden_size = lstm_hidden_size
-        self.lstm_num_layers = lstm_num_layers
-        self.layer_norm = layer_norm
-        self.output_nn_hidden_sizes = output_nn_hidden_sizes
-        self.case_column = case_column
-        self.temperature_column = temperature_column
-        self.power_column = power_column
-        self.out_column = out_column
-        self.zero_power = torch.Tensor(zero_power).to(self.device)
-        self.division_factor = torch.Tensor(division_factor).to(self.device)
-        self.topology = topology
+        self.device = kwargs['device']
+        self.inputs_D = kwargs['inputs_D']
+        self.learn_initial_hidden_states = kwargs['learn_initial_hidden_states']
+        self.feed_input_through_nn = kwargs['feed_input_through_nn']
+        self.input_nn_hidden_sizes = kwargs['input_nn_hidden_sizes']
+        self.lstm_hidden_size = kwargs['lstm_hidden_size']
+        self.lstm_num_layers = kwargs['lstm_num_layers']
+        self.layer_norm = kwargs['layer_norm']
+        self.output_nn_hidden_sizes = kwargs['output_nn_hidden_sizes']
+        self.case_column = kwargs['case_column']
+        self.temperature_column = kwargs['temperature_column']
+        self.power_column = kwargs['power_column']
+        self.out_column = kwargs['out_column']
+        self.zero_power = torch.Tensor(kwargs['zero_power']).to(self.device)
+        self.division_factor = torch.Tensor(kwargs['division_factor']).to(self.device)
+        self.topology = kwargs['topology']
 
         # Define latent variables
         self.last_D = None  ## D
         self.last_E = None  ## E
 
         # Recall normalization constants
-        self.room_min = normalization_variables['Room'][0]
-        self.room_diff = normalization_variables['Room'][1]
-        self.out_min = normalization_variables['Out'][0]
-        self.out_diff = normalization_variables['Out'][1]
-
-        # Specific scalings for the physical parameters `a`, `b`, `c`, `d`
-        self.a_scaling = torch.Tensor(parameter_scalings['a']).to(self.device)
-        self.b_scaling = torch.Tensor(parameter_scalings['b']).to(self.device)
-        self.c_scaling = torch.Tensor(parameter_scalings['c']).to(self.device)
-        self.d_scaling = torch.Tensor(parameter_scalings['d']).to(self.device)
+        self.room_min = torch.Tensor(kwargs['normalization_variables']['Room'][0]).to(self.device)
+        self.room_diff = torch.Tensor(kwargs['normalization_variables']['Room'][1]).to(self.device)
+        self.out_min = torch.Tensor(kwargs['normalization_variables']['Out'][0]).to(self.device)
+        self.out_diff = torch.Tensor(kwargs['normalization_variables']['Out'][1]).to(self.device)
+        
+        # Initial values for the physical parameters `a`, `b`, `c`, `d`
+        self.initial_value_a = torch.Tensor(kwargs['initial_values_physical_parameters']['a']).to(self.device)
+        self.initial_value_b = torch.Tensor(kwargs['initial_values_physical_parameters']['b']).to(self.device)
+        self.initial_value_c = torch.Tensor(kwargs['initial_values_physical_parameters']['c']).to(self.device)
+        self.initial_value_d = torch.Tensor(kwargs['initial_values_physical_parameters']['d']).to(self.device)
 
         # Build the models
         self._build_model()
@@ -564,7 +524,7 @@ class S_PCNN(nn.Module):
                   * self.room_diff[room] + self.room_min[room])
                  - ((x[:, -1, self.out_column] - 0.1) / 0.8
                     * self.out_diff + self.out_min)).
-                    reshape(-1, 1)).squeeze() / self.b_scaling
+                    reshape(-1, 1)).squeeze() * self.initial_value_b
 
         # Loss to the neighboring zone is c*(T_k-T^neigh_k)
         for i, (rooma, roomb) in enumerate(self.topology['Neighbors']):
@@ -576,7 +536,7 @@ class S_PCNN(nn.Module):
                     - ((x[:, -1, self.temperature_column[room2]]
                         + self.last_E[:, room2].clone() - 0.1) / 0.8
                         * self.room_diff[room2] + self.room_min[room2])).
-                        reshape(-1, 1)).squeeze() / self.c_scaling
+                        reshape(-1, 1)).squeeze() * self.initial_value_c
 
         ## Heating/cooling effect of HVAC on 'E'
         
@@ -598,13 +558,13 @@ class S_PCNN(nn.Module):
                 # Heating effect: add a*u to 'E'
                 for i in range(len(self.topology['Rooms'])):
                     E[mask & heating, i] = E[mask & heating, i].clone() + self.a[i](
-                        power[mask & heating, i].unsqueeze(-1)).squeeze() / self.a_scaling[i]
+                        power[mask & heating, i].unsqueeze(-1)).squeeze() * self.initial_value_a[i]
 
             if sum(cooling) > 0:
                 # Cooling effect: add d*u (where u<0 now, so we actually subtract energy) to 'E'
                 for i in range(len(self.topology['Rooms'])):
                     E[mask & cooling, i] = E[mask & cooling, i].clone() + self.d[i](
-                        power[mask & cooling, i].unsqueeze(-1)).squeeze() / self.d_scaling[i]
+                        power[mask & cooling, i].unsqueeze(-1)).squeeze() * self.initial_value_d[i]
 
         # Recall 'D' and 'E' for the next time step
         self.last_D = D.clone()
@@ -642,27 +602,7 @@ class M_PCNN(nn.Module):
     `D` and `E` are then carried on to the next step and updated.
     """
 
-    def __init__(
-            self,
-            device,
-            inputs_D: list,
-            learn_initial_hidden_states: bool,
-            feed_input_through_nn: bool,
-            input_nn_hidden_sizes: list,
-            lstm_hidden_size: int,
-            lstm_num_layers: int,
-            layer_norm: bool,
-            output_nn_hidden_sizes: list,
-            case_column: int,
-            temperature_column: int,
-            out_column: int,
-            power_column: int,
-            zero_power: float,
-            division_factor: list,
-            normalization_variables: dict,
-            parameter_scalings: dict,
-            topology: dict,
-    ):
+    def __init__(self, kwargs: dict):
         """
         Function to build the models.
 
@@ -695,38 +635,38 @@ class M_PCNN(nn.Module):
         super().__init__()
 
         # Recall the parameters for further use
-        self.device = device
-        self.inputs_D = inputs_D
-        self.learn_initial_hidden_states = learn_initial_hidden_states
-        self.feed_input_through_nn = feed_input_through_nn
-        self.input_nn_hidden_sizes = input_nn_hidden_sizes
-        self.lstm_hidden_size = lstm_hidden_size
-        self.lstm_num_layers = lstm_num_layers
-        self.layer_norm = layer_norm
-        self.output_nn_hidden_sizes = output_nn_hidden_sizes
-        self.case_column = case_column
-        self.temperature_column = temperature_column
-        self.power_column = power_column
-        self.out_column = out_column
-        self.zero_power = torch.Tensor(zero_power).to(self.device)
-        self.division_factor = torch.Tensor(division_factor).to(self.device)
-        self.topology = topology
+        self.device = kwargs['device']
+        self.inputs_D = kwargs['inputs_D']
+        self.learn_initial_hidden_states = kwargs['learn_initial_hidden_states']
+        self.feed_input_through_nn = kwargs['feed_input_through_nn']
+        self.input_nn_hidden_sizes = kwargs['input_nn_hidden_sizes']
+        self.lstm_hidden_size = kwargs['lstm_hidden_size']
+        self.lstm_num_layers = kwargs['lstm_num_layers']
+        self.layer_norm = kwargs['layer_norm']
+        self.output_nn_hidden_sizes = kwargs['output_nn_hidden_sizes']
+        self.case_column = kwargs['case_column']
+        self.temperature_column = kwargs['temperature_column']
+        self.power_column = kwargs['power_column']
+        self.out_column = kwargs['out_column']
+        self.zero_power = torch.Tensor(kwargs['zero_power']).to(self.device)
+        self.division_factor = torch.Tensor(kwargs['division_factor']).to(self.device)
+        self.topology = kwargs['topology']
 
         # Define latent variables
         self.last_D = None  ## D
         self.last_E = None  ## E
 
         # Recall normalization constants
-        self.room_min = normalization_variables['Room'][0]
-        self.room_diff = normalization_variables['Room'][1]
-        self.out_min = normalization_variables['Out'][0]
-        self.out_diff = normalization_variables['Out'][1]
+        self.room_min = torch.Tensor(kwargs['normalization_variables']['Room'][0]).to(self.device)
+        self.room_diff = torch.Tensor(kwargs['normalization_variables']['Room'][1]).to(self.device)
+        self.out_min = torch.Tensor(kwargs['normalization_variables']['Out'][0]).to(self.device)
+        self.out_diff = torch.Tensor(kwargs['normalization_variables']['Out'][1]).to(self.device)
 
-        # Specific scalings for the physical parameters `a`, `b`, `c`, `d`
-        self.a_scaling = torch.Tensor(parameter_scalings['a']).to(self.device)
-        self.b_scaling = torch.Tensor(parameter_scalings['b']).to(self.device)
-        self.c_scaling = torch.Tensor(parameter_scalings['c']).to(self.device)
-        self.d_scaling = torch.Tensor(parameter_scalings['d']).to(self.device)
+        # Initial values for the physical parameters `a`, `b`, `c`, `d`
+        self.initial_value_a = torch.Tensor(kwargs['initial_values_physical_parameters']['a']).to(self.device)
+        self.initial_value_b = torch.Tensor(kwargs['initial_values_physical_parameters']['b']).to(self.device)
+        self.initial_value_c = torch.Tensor(kwargs['initial_values_physical_parameters']['c']).to(self.device)
+        self.initial_value_d = torch.Tensor(kwargs['initial_values_physical_parameters']['d']).to(self.device)
 
         # Build the models
         self._build_model()
@@ -886,7 +826,7 @@ class M_PCNN(nn.Module):
                   * self.room_diff[room] + self.room_min[room])
                  - ((x[:, -1, self.out_column] - 0.1) / 0.8
                     * self.out_diff + self.out_min)).
-                    reshape(-1, 1)).squeeze() / self.b_scaling
+                    reshape(-1, 1)).squeeze() * self.initial_value_b
 
         # Loss to the neighboring zone is c*(T_k-T^neigh_k)
         for i, (rooma, roomb) in enumerate(self.topology['Neighbors']):
@@ -898,7 +838,7 @@ class M_PCNN(nn.Module):
                     - ((x[:, -1, self.temperature_column[room2]]
                         + self.last_E[:, room2].clone() - 0.1) / 0.8
                         * self.room_diff[room2] + self.room_min[room2])).
-                        reshape(-1, 1)).squeeze() / self.c_scaling
+                        reshape(-1, 1)).squeeze() * self.initial_value_c
 
         ## Heating/cooling effect of HVAC on 'E'
         # Find sequences in the batch where there actually is heating/cooling
@@ -920,14 +860,14 @@ class M_PCNN(nn.Module):
                 for i in range(len(self.topology['Rooms'])):
                     E[mask & heating, i] = E[mask & heating, i].clone() \
                                                   + self.a[i](power[mask & heating, i].unsqueeze(-1)).squeeze() \
-                                                  / self.a_scaling[i]
+                                                  * self.initial_value_a[i]
 
             if sum(cooling) > 0:
                 # Cooling effect: add d*u (where u<0 now, so we actually subtract energy) to 'E'
                 for i in range(len(self.topology['Rooms'])):
                     E[mask & cooling, i] = E[mask & cooling, i].clone() \
                                                   + self.d[i](power[mask & cooling, i].unsqueeze(-1)).squeeze() \
-                                                  / self.d_scaling[i]
+                                                  * self.initial_value_d[i]
 
         # Recall 'D' and 'E' for the next time step
         self.last_D = D.clone()
@@ -954,22 +894,7 @@ class LSTM(nn.Module):
     2 - Laboratoire d'Automatique 3, EPFL, Switzerland
     """
 
-    def __init__(
-            self,
-            device,
-            rooms: list,
-            inputs_D: list,
-            learn_initial_hidden_states: bool,
-            feed_input_through_nn: bool,
-            input_nn_hidden_sizes: list,
-            lstm_hidden_size: int,
-            lstm_num_layers: int,
-            layer_norm: bool,
-            output_nn_hidden_sizes: list,
-            temperature_column: list,
-            power_column: list,
-            division_factor: list,
-    ):
+    def __init__(self, kwargs: dict):
         """
         Function to build the models.
 
@@ -993,19 +918,19 @@ class LSTM(nn.Module):
         super().__init__()
 
         # Recall the parameters for further use
-        self.device = device
-        self.rooms = rooms
-        self.inputs_D = inputs_D
-        self.learn_initial_hidden_states = learn_initial_hidden_states
-        self.feed_input_through_nn = feed_input_through_nn
-        self.input_nn_hidden_sizes = input_nn_hidden_sizes
-        self.lstm_hidden_size = lstm_hidden_size
-        self.lstm_num_layers = lstm_num_layers
-        self.layer_norm = layer_norm
-        self.output_nn_hidden_sizes = output_nn_hidden_sizes
-        self.temperature_column = temperature_column
-        self.power_columns = power_column
-        self.division_factor = torch.Tensor(division_factor).to(self.device)
+        self.device = kwargs['device']
+        self.rooms = kwargs['rooms']
+        self.inputs_D = kwargs['inputs_D']
+        self.learn_initial_hidden_states = kwargs['learn_initial_hidden_states']
+        self.feed_input_through_nn = kwargs['feed_input_through_nn']
+        self.input_nn_hidden_sizes = kwargs['input_nn_hidden_sizes']
+        self.lstm_hidden_size = kwargs['lstm_hidden_size']
+        self.lstm_num_layers = kwargs['lstm_num_layers']
+        self.layer_norm = kwargs['layer_norm']
+        self.output_nn_hidden_sizes = kwargs['output_nn_hidden_sizes']
+        self.temperature_column = kwargs['temperature_column']
+        self.power_columns = kwargs['power_column']
+        self.division_factor = torch.Tensor(kwargs['division_factor']).to(self.device)
 
         # Define latent variables
         self.last = None  

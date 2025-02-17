@@ -1,22 +1,62 @@
 from loguru import logger
 import pandas as pd
+import numpy as np
+import torch
+
 from pcnn.util import normalize, inverse_normalize
 
-class DataSet:
-    def __init__(self, data, interval, to_normalize) -> None:
 
+class DataSet:
+    def __init__(self, data: pd.DataFrame, data_kwargs: dict) -> None:
+
+        if data_kwargs['verbose'] > 0:
+            logger.info("Preparing the data...")
+
+        # Only keep useful columns
+        X_columns = data_kwargs['X_columns'] 
+        if X_columns is not None:
+            to_keep = [x for x in data.columns if x in list(set(X_columns) | set(data_kwargs['Y_columns']))]
+            data.drop(columns=[x for x in data.columns if x not in to_keep], inplace=True)
+            # Reorder the columns to ensure they are in the right order
+            self.X_columns = [x for x in data.columns if x in X_columns]
+        else:
+            self.X_columns = data.columns
+
+        self.Y_columns = data_kwargs['Y_columns']
+        
+        # Define all needed columns
+        self.case_column = data_kwargs['case_column'] if isinstance(data_kwargs['case_column'], list) else [data_kwargs['case_column']]
+        self.out_column = data_kwargs['out_column']
+        if data_kwargs['neigh_column'] is not None:
+            self.neigh_column = data_kwargs['neigh_column'] if isinstance(data_kwargs['neigh_column'], list) else [data_kwargs['neigh_column']]
+        else:
+            self.neigh_column = data_kwargs['neigh_column']
+        self.temperature_column = data_kwargs['temperature_column'] if isinstance(data_kwargs['temperature_column'], list) else [data_kwargs['temperature_column']]
+        self.power_column = data_kwargs['power_column'] if isinstance(data_kwargs['power_column'], list) else [data_kwargs['power_column']]
+        self.inputs_D = data_kwargs['inputs_D']
+        self.topology = data_kwargs['topology']
+
+        # Sanity check
+        if self.neigh_column is None:
+            logger.info(f'Sanity check of the columns:\n{[(w, [self.X_columns[i] for i in x]) 
+                                                          for w, x in zip(['Case', 'Room temp', 'Room power', 'Out temp'],
+                                    [self.case_column, self.temperature_column, self.power_column, [self.out_column]])]}')
+        else:
+            logger.info(f'Sanity check of the columns:\n{[(w, [self.X_columns[i] for i in x]) 
+                                                          for w, x in zip(['Case', 'Room temp', 'Room power', 'Out temp', 'Neigh temp'],
+                                    [self.case_column, self.temperature_column, self.power_column, [self.out_column], self.neigh_column])]}')
+
+        logger.info(f"Inputs used in D:\n{np.array(self.X_columns)[self.inputs_D]}")
+
+        # Define inputs and labels
         self.data = data
-        self.interval = interval
-        self.to_normalize = to_normalize
+        self.X = self.data[self.X_columns].iloc[:-1, :].copy().values
+        self.Y = self.data[self.Y_columns].iloc[1:, :].copy().values
+        self.interval = (data.index[1] - data.index[0]).seconds / 60
 
         self.is_normalized = False
-
-        self.X = None
-        self.Y = None
         self.min_ = None
         self.max_ = None
-        self.mean = None
-        self.std = None
 
     def normalize(self, data=None):
         """
@@ -96,54 +136,65 @@ class DataSet:
             self.data = data
         else:
             return data
+        
+    def get_normalization_variables(self):
+        """
+        Function to get the minimum and the amplitude of some variables in the data. In particular, we need
+        that for the room temperature, the outside temperature and the neighboring room temperature.
+        This is used by the physics-inspired network to unnormalize the predictions.
+        """
+        normalization_variables = {}
+        normalization_variables['Room'] = [self.min_.iloc[self.temperature_column].values,
+                                           (self.max_ - self.min_).iloc[self.temperature_column].values]
+        if self.neigh_column is not None:
+            normalization_variables['Neigh'] = [self.min_.iloc[self.neigh_column].values,
+                                           (self.max_ - self.min_).iloc[self.neigh_column].values]
+        normalization_variables['Out'] = [[self.min_.iloc[self.out_column]],
+                                          [(self.max_ - self.min_).iloc[self.out_column]]]
+        return normalization_variables
+    
+    def compute_zero_power(self):
+        """
+        Small helper function to compute the scaled value of zero power
+        """
 
-def prepare_data(data: pd.DataFrame, interval: int, model_kwargs: dict, Y_columns: list, X_columns: list = None, verbose: int = 2):
+        # Scale the zero
+        if self.is_normalized:
+            min_ = self.min_.iloc[self.power_column]
+            max_ = self.max_.iloc[self.power_column]
+            zero = 0.8 * (0.0 - min_) / (max_ - min_) + 0.1
+
+        else:
+            zero = np.array([0.0] * len(self.power_column))
+
+        return np.array(zero)
+
+
+def prepare_data(data: pd.DataFrame, data_kwargs: dict, verbose: int = 2):
     """
     Pipeline of actions to take to prepare the data for some model.
 
     Args:
         data:                   DataFrame to use
-        interval:               Sampling time (in minutes) of the data
-        model_kwargs:           Model arguments (start and end date, interval, ...), see 'parameters.py'
-        predict_differences:    Whether to predict differences in outputs
-        Y_columns:              Name of the columns that are to be predicted
-        X_columns:              Sensors (columns) of the input data, if None all columns are kept
+        data_kwargs:            Parameters of the data
         verbose:                Verbose of the function
 
     Returns:
         A preprocessed dataset ready to be put into a model
     """
 
-    # Use the custom function to load and prepare the full dataset from the NEST data
-    dataset = DataSet(data=data.copy(), interval=interval, to_normalize=model_kwargs['to_normalize'])
-
-    if verbose > 0:
-        logger.info("Preparing the data...")
-
-    # Reorder the columns to ensure they are in the right order
-    dataset.X_columns = [x for x in dataset.data.columns if x in X_columns]
-    dataset.Y_columns = Y_columns # [y for y in dataset.data.columns if y in Y_columns]
-
-    # Only keep useful columns
-    if X_columns is not None:
-        to_keep = [x for x in dataset.data.columns if x in list(set(X_columns) | set(Y_columns))]
-        dataset.data.drop(columns=[x for x in dataset.data.columns if x not in to_keep], inplace=True)
+    # Use the custom function to load and prepare the full dataset 
+    data_kwargs['verbose'] = verbose
+    dataset = DataSet(data=data.copy(), data_kwargs=data_kwargs)
 
     # If normalization is wanted
-    if dataset.to_normalize:
+    if data_kwargs['to_normalize']:
         if verbose > 0:
             logger.info("Normalizing the data...")
         dataset.normalize()
 
     if dataset.data.min().min() < 0.05:
         raise ValueError("The data needs to be normalized between 0.1 and 0.9. If it is not already the case, set `to_normalize=True` in the parameters to rescale it accordingly.")
-
-    # Define inputs and labels
-    if X_columns is not None:
-        dataset.X = dataset.data[dataset.X_columns].iloc[:-1, :].copy().values
-    else:
-        dataset.X = dataset.data.iloc[:-1, :].copy().values
-    dataset.Y = dataset.data[dataset.Y_columns].iloc[1:, :].copy().values
 
     assert len(dataset.X) == len(dataset.Y), "Something weird happened!"
 

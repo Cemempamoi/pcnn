@@ -26,53 +26,56 @@ class Model:
     Class of models using PyTorch
     """
 
-    def __init__(self, data: pd.DataFrame, interval: int, model_kwargs: dict, inputs_D: list, 
-                module, rooms, case_column, out_column, neigh_column, temperature_column, power_column,
-                Y_columns: list, X_columns: list = None, topology: dict = None, load_last: bool = False,
-                load: bool = True, device: str = None):
+    def __init__(self, data: pd.DataFrame, module: str, model_kwargs: dict, data_kwargs: dict, 
+                 load: bool = True, load_last: bool = False):
         """
         Initialize a model.
 
         Args:
+            data:           DataFrame to use
+            module:         Module to use
             model_kwargs:   Parameters of the models, see 'parameters.py'
-            Y_columns:      Name of the columns that are to be predicted
-            X_columns:      Sensors (columns) of the input data
+            data_kwargs:    Parameters of the data
+            load:           Whether to load a model or not
+            load_last:      Whether to load the last model or not
         """
-
 
         assert module in ['PCNN', 'S_PCNN', 'M_PCNN', 'LSTM'],\
             f"The provided model type {module} does not exist, please chose among `'PCNN', 'S_PCNN', 'M_PCNN', 'LSTM'`."
 
         # Define the main attributes
-        self.name = model_kwargs["name"]
-        self.model_kwargs = model_kwargs
-        self.rooms = rooms if isinstance(rooms, list) else [rooms]
+        self.module = module
+        self.data_kwargs = data_kwargs
+        self.number_rooms = len(data_kwargs['Y_columns'])
+
+        self.verbose = model_kwargs["verbose"]
+
+        # Prepare the data
+        self.dataset = prepare_data(data=data, data_kwargs=data_kwargs, verbose=self.verbose)
+        # Compute the scaled zero power points and the division factors 
+        model_kwargs['zero_power'] = self.dataset.compute_zero_power()
+        model_kwargs['normalization_variables'] = self.dataset.get_normalization_variables()
 
         # Create the name associated to the model
+        self.name = model_kwargs["name"]
         self.save_name = model_save_name_factory(module=module, model_kwargs=model_kwargs)
-
         if not os.path.isdir(self.save_name):
             os.mkdir(self.save_name)
 
         # Fix the seeds for reproduction
         self._fix_seeds(seed=model_kwargs["seed"])
 
-        self.case_column = case_column if isinstance(case_column, list) else [case_column]
-        self.out_column = out_column
-        if neigh_column is not None:
-            self.neigh_column = neigh_column if isinstance(neigh_column, list) else [neigh_column]
+        # To use the GPU when available
+        if model_kwargs['device'] is None:
+            self.device = check_GPU_availability()
+            model_kwargs['device'] = self.device
         else:
-            self.neigh_column = neigh_column
-        self.temperature_column = temperature_column if isinstance(temperature_column, list) else [temperature_column]
-        self.power_column = power_column if isinstance(power_column, list) else [power_column]
-        self.inputs_D = inputs_D
-        self.topology = topology
-        self.module = module
+            self.device = model_kwargs['device']
 
+        # Store needed parameters
         self.batch_size = model_kwargs["batch_size"]
         self.shuffle = model_kwargs["shuffle"]
         self.n_epochs = model_kwargs["n_epochs"]
-        self.verbose = model_kwargs["verbose"]
         self.learning_rate = model_kwargs["learning_rate"]
         self.decrease_learning_rate = model_kwargs["decrease_learning_rate"]
         self.heating = model_kwargs["heating"]
@@ -83,147 +86,22 @@ class Model:
         self.overlapping_distance = model_kwargs["overlapping_distance"]
         self.validation_percentage = model_kwargs["validation_percentage"]
         self.test_percentage = model_kwargs["test_percentage"]
-        self.feed_input_through_nn = model_kwargs["feed_input_through_nn"]
-        self.input_nn_hidden_sizes = model_kwargs["input_nn_hidden_sizes"]
-        self.lstm_hidden_size = model_kwargs["lstm_hidden_size"]
-        self.lstm_num_layers = model_kwargs["lstm_num_layers"]
-        self.layer_norm = model_kwargs["layer_norm"]
-        self.output_nn_hidden_sizes = model_kwargs["output_nn_hidden_sizes"]
-        self.learn_initial_hidden_states = model_kwargs["learn_initial_hidden_states"]
-        self.division_factor = model_kwargs['division_factor']
-        self.model_kwargs = model_kwargs
-   
-        # Prepare the data
-        self.dataset = prepare_data(data=data, interval=interval, model_kwargs=model_kwargs, 
-                                    Y_columns=Y_columns, X_columns=X_columns, verbose=self.verbose)
-
-        self.model = None
-        self.optimizer = None
-        self.loss = None
-        self.train_losses = []
-        self.validation_losses = []
-        self._validation_losses = []
-        self.test_losses = []
-        self.a = []
-        self.b = []
-        self.c = []
-        self.d = []
-        self.times = []
-        self.heating_sequences, self.cooling_sequences = None, None
-        self.train_sequences = None
-        self.validation_sequences = None
-        self.test_sequences = None
-
-        # Sanity check
-        if self.neigh_column is None:
-            logger.info(f'Sanity check of the columns:\n{[(w, [self.dataset.X_columns[i] for i in x]) 
-                                                          for w, x in zip(['Case', 'Room temp', 'Room power', 'Out temp'],
-                                    [self.case_column, self.temperature_column, self.power_column, [self.out_column]])]}')
-        else:
-            logger.info(f'Sanity check of the columns:\n{[(w, [self.dataset.X_columns[i] for i in x]) 
-                                                          for w, x in zip(['Case', 'Room temp', 'Room power', 'Out temp', 'Neigh temp'],
-                                    [self.case_column, self.temperature_column, self.power_column, [self.out_column], self.neigh_column])]}')
-
-        logger.info(f"Inputs used in D:\n{np.array(self.dataset.X_columns)[inputs_D]}\n")
-
-        # To use the GPU when available
-        if device is None:
-            self.device = check_GPU_availability()
-        else:
-            self.device = device
-
-        # Compute the scaled zero power points and the division factors to use in ResNet-like
-        # modules
-        self.zero_power = self.compute_zero_power()
-        self.normalization_variables = self.get_normalization_variables()
-        self.parameter_scalings = self.create_scalings()
 
         # Prepare the torch module
+        # Group parameters for simplicity
+        kwargs = model_kwargs | data_kwargs
         if self.module == "PCNN":
-            self.model = PCNN(
-                device=self.device,
-                inputs_D=self.inputs_D,
-                learn_initial_hidden_states=self.learn_initial_hidden_states,
-                feed_input_through_nn=self.feed_input_through_nn,
-                input_nn_hidden_sizes=self.input_nn_hidden_sizes,
-                lstm_hidden_size=self.lstm_hidden_size,
-                lstm_num_layers=self.lstm_num_layers,
-                layer_norm=self.layer_norm,
-                output_nn_hidden_sizes=self.output_nn_hidden_sizes,
-                case_column=self.case_column,
-                temperature_column=self.temperature_column,
-                power_column=self.power_column,
-                out_column=self.out_column,
-                neigh_column=self.neigh_column,
-                zero_power=self.zero_power,
-                division_factor=self.division_factor,
-                normalization_variables=self.normalization_variables,
-                parameter_scalings=self.parameter_scalings,
-            )
-        
+            self.model = PCNN(kwargs=kwargs)
         elif self.module == "S_PCNN":
-            self.model = S_PCNN(
-                device=self.device,
-                inputs_D=self.inputs_D,
-                learn_initial_hidden_states=self.learn_initial_hidden_states,
-                feed_input_through_nn=self.feed_input_through_nn,
-                input_nn_hidden_sizes=self.input_nn_hidden_sizes,
-                lstm_hidden_size=self.lstm_hidden_size,
-                lstm_num_layers=self.lstm_num_layers,
-                layer_norm=self.layer_norm,
-                output_nn_hidden_sizes=self.output_nn_hidden_sizes,
-                case_column=self.case_column,
-                temperature_column=self.temperature_column,
-                power_column=self.power_column,
-                out_column=self.out_column,
-                zero_power=self.zero_power,
-                division_factor=self.division_factor,
-                normalization_variables=self.normalization_variables,
-                parameter_scalings=self.parameter_scalings,
-                topology=self.topology,
-            )
-
+            self.model = S_PCNN(kwargs=kwargs)
         elif self.module == "M_PCNN":
-            self.model = M_PCNN(
-                device=self.device,
-                inputs_D=self.inputs_D,
-                learn_initial_hidden_states=self.learn_initial_hidden_states,
-                feed_input_through_nn=self.feed_input_through_nn,
-                input_nn_hidden_sizes=self.input_nn_hidden_sizes,
-                lstm_hidden_size=self.lstm_hidden_size,
-                lstm_num_layers=self.lstm_num_layers,
-                layer_norm=self.layer_norm,
-                output_nn_hidden_sizes=self.output_nn_hidden_sizes,
-                case_column=self.case_column,
-                temperature_column=self.temperature_column,
-                power_column=self.power_column,
-                out_column=self.out_column,
-                zero_power=self.zero_power,
-                division_factor=self.division_factor,
-                normalization_variables=self.normalization_variables,
-                parameter_scalings=self.parameter_scalings,
-                topology=self.topology,
-            )
-
+            self.model = M_PCNN(kwargs=kwargs)
         elif self.module == "LSTM":
-            self.model = LSTM(
-                device=self.device,
-                rooms=self.rooms,
-                inputs_D=self.inputs_D,
-                learn_initial_hidden_states=self.learn_initial_hidden_states,
-                feed_input_through_nn=self.feed_input_through_nn,
-                input_nn_hidden_sizes=self.input_nn_hidden_sizes,
-                lstm_hidden_size=self.lstm_hidden_size,
-                lstm_num_layers=self.lstm_num_layers,
-                layer_norm=self.layer_norm,
-                output_nn_hidden_sizes=self.output_nn_hidden_sizes,
-                temperature_column=self.temperature_column,
-                power_column=self.power_column,
-                division_factor=self.division_factor
-            )
+            self.model = LSTM(kwargs=kwargs)
 
+        # define the optimizer and the loss
         self.optimizer = optim.Adam(self.model.parameters(), lr=model_kwargs["learning_rate"])
-        self.loss = F.mse_loss
+        self.loss = model_kwargs['loss']
 
         # Load the model if it exists
         if load:
@@ -235,7 +113,21 @@ class Model:
             self.train_test_validation_separation(validation_percentage=self.validation_percentage,
                                                   test_percentage=self.test_percentage)
 
+        # Push everything to the right device
         self.model = self.model.to(self.device)
+
+        # Prepare the lists to store progress
+        self.train_losses = []
+        self.validation_losses = []
+        self.test_losses = []
+        self.a = []
+        self.b = []
+        self.c = []
+        self.d = []
+        self.times = []
+
+        # Save the updated parameters
+        self.model_kwargs = model_kwargs
 
     @property
     def X(self):
@@ -469,102 +361,6 @@ class Model:
                 self.train_sequences += sequences[:train_validation_sep]
                 self.validation_sequences += sequences[train_validation_sep:validation_test_sep]
                 self.test_sequences += sequences[validation_test_sep:]
-
-    def compute_zero_power(self):
-        """
-        Small helper function to compute the scaled value of zero power
-        """
-
-        # Scale the zero
-        if self.dataset.is_normalized:
-            min_ = self.dataset.min_.iloc[self.power_column]
-            max_ = self.dataset.max_.iloc[self.power_column]
-            zero = 0.8 * (0.0 - min_) / (max_ - min_) + 0.1
-
-        else:
-            zero = np.array([0.0] * len(self.power_column))
-
-        return np.array(zero)
-
-    def create_scalings(self):
-        """
-        Function to initialize good parameters for a, b, c and d, the key parameters of the structure.
-        Intuition:
-          - The room loses 1.5 degrees in 6h when the outside temperature is 25 degrees lower than
-              the inside one (and some for losses to the neighboring room)
-          - The room gains 2 degrees in 4h of heating
-
-        Returns:
-            The scaling parameters according to the data
-        """
-
-        parameter_scalings = {}
-
-        if self.unit == 'DFAB':
-            # DFAB power is in kW
-            parameter_scalings['b'] = [1 / (2 / (self.dataset.max_ - self.dataset.min_).iloc[self.temperature_column]
-                                           * 0.8 / 25 / 6 / 60 * self.dataset.interval).mean()]
-            parameter_scalings['c'] = [1 / (2.5 / (self.dataset.max_ - self.dataset.min_).iloc[self.temperature_column]
-                                           * 0.8 / 25 / 6 / 60 * self.dataset.interval).mean() / 10]
-
-            parameter_scalings['a'] = [
-                1 / (1 / (self.dataset.max_ - self.dataset.min_).iloc[self.temperature_column[i]] * 0.8  # Gain 2 degrees
-                     / (self.dataset.max_['Thermal total power'] / (self.dataset.max_ - self.dataset.min_).iloc[
-                            'Thermal total power'] * 0.8)  # With average power of 1500 W
-                     / (10 * 60 / self.dataset.interval)) for i in range(len(self.rooms))]  # In 4h
-            parameter_scalings['d'] = [
-                1 / (1 / (self.dataset.max_ - self.dataset.min_).iloc[self.temperature_column[i]] * 0.8  # Gain 2 degrees
-                     / (- self.dataset.min_['Thermal total power'] / (self.dataset.max_ - self.dataset.min_).iloc[
-                            'Thermal total power'] * 0.8)  # With average power of 1000 W
-                     / (10 * 60 / self.dataset.interval)) for i in range(len(self.rooms))]  # In 4h
-
-        else:
-            parameter_scalings['b'] = [1 / (1.5 / (self.dataset.max_ - self.dataset.min_).iloc[self.temperature_column]
-                                           * 0.8 / 25 / 6 / 60 * self.dataset.interval).mean()]
-            parameter_scalings['c'] = [1 / (1.5 / (self.dataset.max_ - self.dataset.min_).iloc[self.temperature_column]
-                                           * 0.8 / 25 / 6 / 60 * self.dataset.interval).mean() / 10]
-
-            # needed condition to make sure to deal with data in Watts and kWs
-            if (self.dataset.max_ - self.dataset.min_).iloc[self.power_column[0]] > 100:
-                parameter_scalings['a'] = [
-                    1 / (2 / (self.dataset.max_ - self.dataset.min_).iloc[self.temperature_column[i]] * 0.8  # Gain 2 degrees
-                         / (1000 / (self.dataset.max_ - self.dataset.min_).iloc[
-                                self.power_column[i]] * 0.8)  # With average power of 1.5 kW
-                         / (4 * 60 / self.dataset.interval)) for i in range(len(self.rooms))] # in 4h
-                parameter_scalings['d'] = [
-                    1 / (2 / (self.dataset.max_ - self.dataset.min_).iloc[self.temperature_column[i]] * 0.8  # Gain 2 degrees
-                         / (1000 / (self.dataset.max_ - self.dataset.min_).iloc[
-                                self.power_column[i]] * 0.8)  # With average power of 1.5 kW
-                         / (4 * 60 / self.dataset.interval)) for i in range(len(self.rooms))] # in 4h
-            else:
-                parameter_scalings['a'] = [
-                    1 / (2 / (self.dataset.max_ - self.dataset.min_).iloc[self.temperature_column[i]] * 0.8  # Gain 2 degrees
-                         / (self.dataset.max_.iloc[self.power_column[i]] * 3/2 / (self.dataset.max_ - self.dataset.min_).iloc[
-                                self.power_column[i]] * 0.8)  # With average power of 1.5 kW
-                         / (4 * 60 / self.dataset.interval)) for i in range(len(self.rooms))]  # in 4h
-                parameter_scalings['d'] = [
-                    1 / (2 / (self.dataset.max_ - self.dataset.min_).iloc[self.temperature_column[i]] * 0.8  # Gain 2 degrees
-                         / (self.dataset.max_.iloc[self.power_column[i]] * 3/2 / (self.dataset.max_ - self.dataset.min_).iloc[
-                                self.power_column[i]] * 0.8)  # With average power of 1.5 kW
-                         / (4 * 60 / self.dataset.interval)) for i in range(len(self.rooms))]  # in 4h
-
-        return parameter_scalings
-
-    def get_normalization_variables(self):
-        """
-        Function to get the minimum and the amplitude of some variables in the data. In particular, we need
-        that for the room temperature, the outside temperature and the neighboring room temperature.
-        This is used by the physics-inspired network to unnormalize the predictions.
-        """
-        normalization_variables = {}
-        normalization_variables['Room'] = [torch.Tensor(self.dataset.min_.iloc[self.temperature_column].values).to(self.device),
-                                           torch.Tensor((self.dataset.max_ - self.dataset.min_).iloc[self.temperature_column].values).to(self.device)]
-        if self.neigh_column is not None:
-            normalization_variables['Neigh'] = [torch.Tensor(self.dataset.min_.iloc[self.neigh_column].values).to(self.device),
-                                           torch.Tensor((self.dataset.max_ - self.dataset.min_).iloc[self.neigh_column].values).to(self.device)]
-        normalization_variables['Out'] = [torch.Tensor([self.dataset.min_.iloc[self.out_column]]).to(self.device),
-                                          torch.Tensor([(self.dataset.max_ - self.dataset.min_).iloc[self.out_column]]).to(self.device)]
-        return normalization_variables
 
     def batch_iterator(self, iterator_type: str = "train", batch_size: int = None, shuffle: bool = True) -> None:
         """
@@ -956,25 +752,16 @@ class Model:
             {
                 "model_state_dict": self.model.state_dict(),
                 "optimizer_state_dict": self.optimizer.state_dict(),
-                "train_sequences": self.train_sequences,
-                "validation_sequences": self.validation_sequences,
-                "test_sequences": self.test_sequences,
                 "train_losses": self.train_losses,
                 "validation_losses": self.validation_losses,
-                "_validation_losses": self._validation_losses,
                 "test_losses": self.test_losses,
                 "times": self.times,
                 "a": self.a,
                 "b": self.b,
                 "c": self.c,
                 "d": self.d,
-                "warm_start_length": self.warm_start_length,
-                "maximum_sequence_length": self.maximum_sequence_length,
-                "feed_input_through_nn": self.feed_input_through_nn,
-                "input_nn_hidden_sizes": self.input_nn_hidden_sizes,
-                "lstm_hidden_size": self.lstm_hidden_size,
-                "lstm_num_layers": self.lstm_num_layers,
-                "output_nn_hidden_sizes": self.output_nn_hidden_sizes,
+                "model_kwargs": self.model_kwargs,
+                "data_kwargs": self.data_kwargs
             },
             save_name,
         )
@@ -1014,9 +801,6 @@ class Model:
                     for k, v in state.items():
                         if isinstance(v, torch.Tensor):
                             state[k] = v.cuda()
-            self.train_sequences = checkpoint["train_sequences"]
-            self.validation_sequences = checkpoint["validation_sequences"]
-            self.test_sequences = checkpoint["test_sequences"]
             self.train_losses = checkpoint["train_losses"]
             self.validation_losses = checkpoint["validation_losses"]
             self.test_losses = checkpoint["test_losses"]
@@ -1025,13 +809,16 @@ class Model:
             self.b = checkpoint["b"]
             self.c = checkpoint["c"]
             self.d = checkpoint["d"]
-            self.warm_start_length = checkpoint["warm_start_length"]
-            self.maximum_sequence_length = checkpoint["maximum_sequence_length"]
-            self.feed_input_through_nn = checkpoint["feed_input_through_nn"]
-            self.input_nn_hidden_sizes = checkpoint["input_nn_hidden_sizes"]
-            self.lstm_hidden_size = checkpoint["lstm_hidden_size"]
-            self.lstm_num_layers = checkpoint["lstm_num_layers"]
-            self.output_nn_hidden_sizes = checkpoint["output_nn_hidden_sizes"]
+            for key in self.model_kwargs:
+                if key in checkpoint['model_kwargs']:
+                    if self.model_kwargs[key] != checkpoint['model_kwargs'][key]:
+                        logger.warning(f"The parameter {key} was found in the checkpoint but with a different value than the one used to train the model. The checkpoint value is used.")
+            for key in self.data_kwargs:
+                if key in checkpoint['data_kwargs']:
+                    if self.data_kwargs[key] != checkpoint['data_kwargs'][key]: 
+                        logger.warning(f"The parameter {key} was found in the checkpoint but with a different value than the one used to train the model. The checkpoint value is used.")
+            self.model_kwargs = checkpoint["model_kwargs"]
+            self.data_kwargs = checkpoint["data_kwargs"]
 
             # Print the current status of the found model
             if self.verbose > 0:

@@ -6,6 +6,8 @@ in the individual parameters below
 """
 
 import os
+import torch.nn.functional as F
+
 
 DATA_SAVE_PATH = os.path.join("saves", "data")
 MODEL_SAVE_PATH = os.path.join("saves", "models")
@@ -19,15 +21,14 @@ def parameters(to_normalize: bool = True,
                 name: str = "Default_model", save_path: str = MODEL_SAVE_PATH,
                 seed: int = 0, batch_size: int = 128, shuffle: bool = True, n_epochs: int = 20,
                 learning_rate: float = 0.05, decrease_learning_rate:bool = True,
-                heating: bool = True, cooling: bool = True,
+                heating: bool = True, cooling: bool = True, loss = F.mse_loss,
                 warm_start_length: int = 12, minimum_sequence_length: int = 5, maximum_sequence_length: int = 240,
                 overlapping_distance: int = 4, validation_percentage: float = 0.2, test_percentage: float = 0.1,
                 learn_initial_hidden_states: bool = True, feed_input_through_nn: bool = True,
                 input_nn_hidden_sizes: list = [128], lstm_hidden_size: int = 256,
-                layer_norm: bool = True,
-                lstm_num_layers: int = 1,
+                layer_norm: bool = True, lstm_num_layers: int = 1,
                 output_nn_hidden_sizes: list = [128, 128], division_factor: float = 10.,
-                verbose: int = 2):
+                device: str = None, verbose: int = 2):
     """
     Parameters of the models
 
@@ -81,6 +82,7 @@ def parameters(to_normalize: bool = True,
                 to_normalize=to_normalize,
                 heating=heating,
                 cooling=cooling,
+                loss=loss,
                 learn_initial_hidden_states=learn_initial_hidden_states,
                 warm_start_length=warm_start_length,
                 minimum_sequence_length=minimum_sequence_length,
@@ -100,5 +102,6 @@ def parameters(to_normalize: bool = True,
                 layer_norm=layer_norm,
                 output_nn_hidden_sizes=output_nn_hidden_sizes,
                 division_factor=division_factor,
+                device=device,
                 verbose=verbose)
 
