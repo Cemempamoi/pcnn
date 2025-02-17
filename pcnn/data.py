@@ -135,6 +135,9 @@ def prepare_data(data: pd.DataFrame, interval: int, model_kwargs: dict, Y_column
             logger.info("Normalizing the data...")
         dataset.normalize()
 
+    if dataset.data.min().min() < 0.05:
+        raise ValueError("The data needs to be normalized between 0.1 and 0.9. If it is not already the case, set `to_normalize=True` in the parameters to rescale it accordingly.")
+
     # Define inputs and labels
     if X_columns is not None:
         dataset.X = dataset.data[dataset.X_columns].iloc[:-1, :].copy().values
