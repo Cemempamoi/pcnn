@@ -45,13 +45,16 @@ class Model:
 
         # Define the main attributes
         self.module = module
-        self.data_kwargs = data_kwargs
         self.number_rooms = len(data_kwargs['Y_columns'])
+        model_kwargs['number_rooms'] = self.number_rooms
 
         self.verbose = model_kwargs["verbose"]
 
         # Prepare the data
         self.dataset = prepare_data(data=data, data_kwargs=data_kwargs, verbose=self.verbose)
+        # Recover the updated data kwargs
+        data_kwargs = self.dataset.data_kwargs
+
         # Compute the scaled zero power points and the division factors 
         model_kwargs['zero_power'] = self.dataset.compute_zero_power()
         model_kwargs['normalization_variables'] = self.dataset.get_normalization_variables()
@@ -87,6 +90,8 @@ class Model:
         self.validation_percentage = model_kwargs["validation_percentage"]
         self.test_percentage = model_kwargs["test_percentage"]
 
+        self.case_column = data_kwargs['case_column']
+
         # Prepare the torch module
         # Group parameters for simplicity
         kwargs = model_kwargs | data_kwargs
@@ -104,6 +109,7 @@ class Model:
         self.loss = model_kwargs['loss']
 
         # Load the model if it exists
+        self.train_sequences = None
         if load:
             self.load(load_last=load_last)
 
@@ -128,6 +134,7 @@ class Model:
 
         # Save the updated parameters
         self.model_kwargs = model_kwargs
+        self.data_kwargs = data_kwargs
 
     @property
     def X(self):
@@ -326,7 +333,7 @@ class Model:
         if self.verbose > 0:
             logger.info("Creating training, validation and testing data...\n")
 
-        for sequences in [self.heating_sequences, self.cooling_sequences]:
+        for i, sequences in enumerate([self.heating_sequences, self.cooling_sequences]):
             if len(sequences) > 0:
                 # Given the total number of sequences, define approximate separations between training
                 # validation and testing sets
@@ -343,7 +350,7 @@ class Model:
                 # If there is no missing data, the above code will fail to fully separate train and validation sequences
                 # In that casem fall back to the default threshold
                 if train_validation_sep == 0:
-                    logger.warning("Could not fully separate training and validation sequences, some data will overlap.")
+                    logger.warning(f"Could not fully separate training and validation {'heating' if i==0 else 'cooling'} sequences, some data will overlap.")
                     logger.info("This error arises if there is no missing data - to avoid it, remove a datapoint (set it to Nan) in the data where the seapration should be.\n")
                     train_validation_sep = int((1 - test_percentage - validation_percentage) * len(sequences))
 
@@ -353,7 +360,7 @@ class Model:
                     validation_test_sep -= 1
 
                 if train_validation_sep == train_validation_sep:
-                    logger.warning("Could not fully separate validation and testing sequences, some data will overlap.")
+                    logger.warning(f"Could not fully separate validation and testing {'heating' if i==0 else 'cooling'} sequences, some data will overlap.")
                     logger.info("This error arises if there is no missing data - to avoid it, remove a datapoint (set it to Nan) in the data where the seapration should be.\n")
                     validation_test_sep = int((1 - test_percentage) * len(sequences))
 
@@ -471,10 +478,10 @@ class Model:
             if isinstance(data, tuple):
                 if len(data[0].shape) == 3:
                     batch_x = data[0].reshape(data[0].shape[0], data[0].shape[1], -1)
-                    batch_y = data[1].reshape(data[0].shape[0], data[0].shape[1], len(self.rooms))
+                    batch_y = data[1].reshape(data[0].shape[0], data[0].shape[1], self.number_rooms)
                 else:
                     batch_x = data[0].reshape(1, data[0].shape[0], -1)
-                    batch_y = data[1].reshape(1, data[0].shape[0], len(self.rooms))
+                    batch_y = data[1].reshape(1, data[0].shape[0], self.number_rooms)
             else:
                 if len(data.shape) == 3:
                     batch_x = data.reshape(data.shape[0], data.shape[1], -1)
@@ -485,7 +492,7 @@ class Model:
         else:
             raise ValueError("Either sequences or data must be provided to the `predict` function")
 
-        predictions = torch.zeros((batch_x.shape[0], batch_x.shape[1], len(self.rooms))).to(self.device)
+        predictions = torch.zeros((batch_x.shape[0], batch_x.shape[1], self.number_rooms)).to(self.device)
         states = None
 
         # Iterate through the sequences of data to predict each step, replacing the true power and temperature
