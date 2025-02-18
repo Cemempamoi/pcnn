@@ -216,15 +216,10 @@ class PCNN(nn.Module):
 
         ## Forward 'D'
         # Input embedding when wanted
+        D_embedding = x[:, :, self.inputs_D]
         if self.feed_input_through_nn:
-            D_embedding = torch.zeros(x.shape[0], x.shape[1], self.input_nn_hidden_sizes[-1]).to(self.device)
-            for time_step in range(x.shape[1]):
-                temp = x[:, time_step, self.inputs_D]
-                for layer in self.input_nn:
-                    temp = layer(temp)
-                D_embedding[:, time_step, :] = temp
-        else:
-            D_embedding = x[:, :, self.inputs_D]
+            for layer in self.input_nn:
+                D_embedding = layer(D_embedding)
 
         # LSTM prediction for the base temperature
         lstm_output, (h, c) = self.lstm(D_embedding, (h, c))
@@ -397,14 +392,11 @@ class S_PCNN(nn.Module):
         """
 
         ## Initialization of the parameters of `E`
-        self.a = nn.ModuleList(
-            [PositiveLinear(1, 1, require_bias=False) for _ in range(len(self.topology['Rooms']))])
-        self.b = nn.ModuleList(
-            [PositiveLinear(1, 1, require_bias=False) for _ in range(len(self.topology['Outside']))])
+        self.a = PositiveLinear(len(self.topology['Rooms']), 1, require_bias=False)
+        self.b = PositiveLinear(len(self.topology['Outside']), 1, require_bias=False)
         self.c = nn.ModuleList(
             [PositiveLinear(1, 1, require_bias=False) for _ in range(len(self.topology['Neighbors']))])
-        self.d = nn.ModuleList(
-            [PositiveLinear(1, 1, require_bias=False) for _ in range(len(self.topology['Rooms']))])
+        self.d = PositiveLinear(len(self.topology['Rooms']), 1, require_bias=False)
 
         ## Initialization of `D`
         # Hidden and cell state initialization
@@ -489,15 +481,10 @@ class S_PCNN(nn.Module):
 
         ## Forward 'D'
         # Input embedding when wanted
+        D_embedding = x[:, :, self.inputs_D]
         if self.feed_input_through_nn:
-            D_embedding = torch.zeros(x.shape[0], x.shape[1], self.input_nn_hidden_sizes[-1]).to(self.device)
-            for time_step in range(x.shape[1]):
-                temp = x[:, time_step, self.inputs_D]
-                for layer in self.input_nn:
-                    temp = layer(temp)
-                D_embedding[:, time_step, :] = temp
-        else:
-            D_embedding = x[:, :, self.inputs_D]
+            for layer in self.input_nn:
+                D_embedding = layer(D_embedding)
 
         # LSTM prediction for the base temperature
         lstm_output, (h, c) = self.lstm(D_embedding, (h, c))
@@ -517,14 +504,13 @@ class S_PCNN(nn.Module):
         E = self.last_E.clone()  
 
         # Loss to the outside is b*(T_k-T^out_k)
-        for i, room in enumerate(self.topology['Outside']):
-            E[:, room] = E[:, room].clone() - self.b[i](
-                (((x[:, -1, self.temperature_column[room]]
-                   + self.last_E[:, room].clone() - 0.1) / 0.8
-                  * self.room_diff[room] + self.room_min[room])
-                 - ((x[:, -1, self.out_column] - 0.1) / 0.8
-                    * self.out_diff + self.out_min)).
-                    reshape(-1, 1)).squeeze() * self.initial_value_b
+        E[:, self.topology['Outside']] = E[:, self.topology['Outside']].clone() - self.b(
+            (((x[:, -1, self.temperature_column[self.topology['Outside']]]
+                + self.last_E[:, self.topology['Outside']].clone() - 0.1) / 0.8
+                * self.room_diff[self.topology['Outside']] + self.room_min[self.topology['Outside']])
+                - ((x[:, -1, self.out_column] - 0.1) / 0.8
+                * self.out_diff + self.out_min)).
+                reshape(-1, 1)).squeeze() * self.initial_value_b
 
         # Loss to the neighboring zone is c*(T_k-T^neigh_k)
         for i, (rooma, roomb) in enumerate(self.topology['Neighbors']):
@@ -556,15 +542,13 @@ class S_PCNN(nn.Module):
 
             if sum(heating) > 0:
                 # Heating effect: add a*u to 'E'
-                for i in range(len(self.topology['Rooms'])):
-                    E[mask & heating, i] = E[mask & heating, i].clone() + self.a[i](
-                        power[mask & heating, i].unsqueeze(-1)).squeeze() * self.initial_value_a[i]
+                E[mask & heating, :] = E[mask & heating, :].clone() + self.a(
+                    power[mask & heating, :]) * self.initial_value_a
 
             if sum(cooling) > 0:
                 # Cooling effect: add d*u (where u<0 now, so we actually subtract energy) to 'E'
-                for i in range(len(self.topology['Rooms'])):
-                    E[mask & cooling, i] = E[mask & cooling, i].clone() + self.d[i](
-                        power[mask & cooling, i].unsqueeze(-1)).squeeze() * self.initial_value_d[i]
+                E[mask & cooling, :] = E[mask & cooling, :].clone() + self.d(
+                    power[mask & cooling, :]) * self.initial_value_d
 
         # Recall 'D' and 'E' for the next time step
         self.last_D = D.clone()
@@ -681,14 +665,11 @@ class M_PCNN(nn.Module):
         """
 
         ## Initialization of the parameters of `E`
-        self.a = nn.ModuleList(
-            [PositiveLinear(1, 1, require_bias=False) for _ in range(len(self.topology['Rooms']))])
-        self.b = nn.ModuleList(
-            [PositiveLinear(1, 1, require_bias=False) for _ in range(len(self.topology['Outside']))])
+        self.a = PositiveLinear(len(self.topology['Rooms']), 1, require_bias=False)
+        self.b = PositiveLinear(len(self.topology['Outside']), 1, require_bias=False)
         self.c = nn.ModuleList(
             [PositiveLinear(1, 1, require_bias=False) for _ in range(len(self.topology['Neighbors']))])
-        self.d = nn.ModuleList(
-            [PositiveLinear(1, 1, require_bias=False) for _ in range(len(self.topology['Rooms']))])
+        self.d = PositiveLinear(len(self.topology['Rooms']), 1, require_bias=False)
 
         ## Initialization of `D`
         # Hidden and cell state initialization
@@ -786,12 +767,9 @@ class M_PCNN(nn.Module):
         if self.feed_input_through_nn:
             embeddings = []
             for i, input_nn in enumerate(self.input_nn):
-                D_embedding = torch.zeros(x.shape[0], x.shape[1], self.input_nn_hidden_sizes[-1]).to(self.device)
-                for time_step in range(x.shape[1]):
-                    temp = x[:, time_step, self.inputs_D[i]]
-                    for layer in input_nn:
-                        temp = layer(temp)
-                    D_embedding[:, time_step, :] = temp
+                D_embedding = x[:, :, self.inputs_D[i]]
+                for layer in input_nn:
+                    temp = layer(temp)
                 embeddings.append(D_embedding)
         else:
             D_embedding = [x[:, :, input_D] for input_D in self.inputs_D]
@@ -820,10 +798,10 @@ class M_PCNN(nn.Module):
 
         # Loss to the outside is b*(T_k-T^out_k)
         for i, room in enumerate(self.topology['Outside']):
-            E[:, room] = E[:, room].clone() - self.b[i](
-                (((x[:, -1, self.temperature_column[room]]
-                   + self.last_E[:, room].clone() - 0.1) / 0.8
-                  * self.room_diff[room] + self.room_min[room])
+            E = E.clone() - self.b(
+                (((x[:, -1, self.temperature_column]
+                   + self.last_E.clone() - 0.1) / 0.8
+                  * self.room_diff + self.room_min)
                  - ((x[:, -1, self.out_column] - 0.1) / 0.8
                     * self.out_diff + self.out_min)).
                     reshape(-1, 1)).squeeze() * self.initial_value_b
@@ -857,17 +835,13 @@ class M_PCNN(nn.Module):
 
             if sum(heating) > 0:
                 # Heating effect: add a*u to 'E'
-                for i in range(len(self.topology['Rooms'])):
-                    E[mask & heating, i] = E[mask & heating, i].clone() \
-                                                  + self.a[i](power[mask & heating, i].unsqueeze(-1)).squeeze() \
-                                                  * self.initial_value_a[i]
+                E[mask & heating, :] = E[mask & heating, :].clone() \
+                                        + self.a(power[mask & heating, :])  * self.initial_value_a
 
             if sum(cooling) > 0:
                 # Cooling effect: add d*u (where u<0 now, so we actually subtract energy) to 'E'
-                for i in range(len(self.topology['Rooms'])):
-                    E[mask & cooling, i] = E[mask & cooling, i].clone() \
-                                                  + self.d[i](power[mask & cooling, i].unsqueeze(-1)).squeeze() \
-                                                  * self.initial_value_d[i]
+                E[mask & cooling, :] = E[mask & cooling, :].clone() \
+                                                + self.d(power[mask & cooling, :]) * self.initial_value_d
 
         # Recall 'D' and 'E' for the next time step
         self.last_D = D.clone()
@@ -919,7 +893,7 @@ class LSTM(nn.Module):
 
         # Recall the parameters for further use
         self.device = kwargs['device']
-        self.rooms = kwargs['rooms']
+        self.number_rooms = kwargs['number_rooms']
         self.inputs_D = kwargs['inputs_D']
         self.learn_initial_hidden_states = kwargs['learn_initial_hidden_states']
         self.feed_input_through_nn = kwargs['feed_input_through_nn']
@@ -966,7 +940,7 @@ class LSTM(nn.Module):
             self.norm = nn.LayerNorm(normalized_shape=self.lstm_hidden_size)
 
         # Create the NNs to process the output of the LSTMs for each modules
-        sizes = [self.lstm_hidden_size] + self.output_nn_hidden_sizes + [len(self.rooms)]
+        sizes = [self.lstm_hidden_size] + self.output_nn_hidden_sizes + [self.number_rooms]
         self.output_nn = nn.ModuleList([nn.Sequential(nn.Linear(sizes[i], sizes[i + 1]), nn.Tanh())
                                                 for i in range(0, len(sizes) - 1)])
 
