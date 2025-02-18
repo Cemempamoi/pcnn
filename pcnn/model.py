@@ -359,7 +359,7 @@ class Model:
                         break
                     validation_test_sep -= 1
 
-                if train_validation_sep == train_validation_sep:
+                if validation_test_sep == train_validation_sep:
                     logger.warning(f"Could not fully separate validation and testing {'heating' if i==0 else 'cooling'} sequences, some data will overlap.")
                     logger.info("This error arises if there is no missing data - to avoid it, remove a datapoint (set it to Nan) in the data where the seapration should be.\n")
                     validation_test_sep = int((1 - test_percentage) * len(sequences))
