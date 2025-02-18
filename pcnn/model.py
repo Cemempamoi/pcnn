@@ -18,7 +18,7 @@ import torch.nn.functional as F
 
 from pcnn.module import PCNN, S_PCNN, M_PCNN, LSTM
 from pcnn.data import prepare_data
-from pcnn.util import model_save_name_factory, format_elapsed_time, inverse_normalize, check_GPU_availability, elapsed_timer
+from pcnn.util import model_save_name_factory, format_elapsed_time, inverse_normalize, check_GPU_availability, elapsed_timer, ensure_list
 
 
 class Model:
@@ -58,6 +58,9 @@ class Model:
         # Compute the scaled zero power points and the division factors 
         model_kwargs['zero_power'] = self.dataset.compute_zero_power()
         model_kwargs['normalization_variables'] = self.dataset.get_normalization_variables()
+
+        for key in model_kwargs['initial_values_physical_parameters']:
+            model_kwargs['initial_values_physical_parameters'][key] = ensure_list(model_kwargs['initial_values_physical_parameters'][key])
 
         # Create the name associated to the model
         self.name = model_kwargs["name"]
@@ -108,6 +111,10 @@ class Model:
         self.optimizer = optim.Adam(self.model.parameters(), lr=model_kwargs["learning_rate"])
         self.loss = model_kwargs['loss']
 
+        # Save the updated parameters
+        self.model_kwargs = model_kwargs
+        self.data_kwargs = data_kwargs
+
         # Load the model if it exists
         self.train_sequences = None
         if load:
@@ -131,10 +138,6 @@ class Model:
         self.c = []
         self.d = []
         self.times = []
-
-        # Save the updated parameters
-        self.model_kwargs = model_kwargs
-        self.data_kwargs = data_kwargs
 
     @property
     def X(self):

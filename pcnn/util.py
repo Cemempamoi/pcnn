@@ -201,10 +201,10 @@ def elapsed_timer():
 
 def ensure_list(value):
     if value is not None:
-        if isinstance(value, list):
-            return value
-        else:
+        if isinstance(value, float) or isinstance(value, int):
             return [value]
+        else:
+            return value
     else:
         return None
 
@@ -226,10 +226,8 @@ def initialize_heat_losses_from_temperature_differences(degrees_lost: list, temp
     """
 
     # Need the output as an array
-    if isinstance(degrees_lost, float) or isinstance(degrees_lost, int):
-        degrees_lost = [degrees_lost]
-    if isinstance(temperature_difference, float) or isinstance(temperature_difference, int):
-        temperature_difference = [temperature_difference]
+    degrees_lost = ensure_list(degrees_lost)
+    temperature_difference = ensure_list(temperature_difference)
 
     # Heat losses approximation
     # T_diff_inside ~ b * T_diff_outside * time_elapsed  (or c * T_diff_neighboring room * time_elapsed)
@@ -266,10 +264,8 @@ def initialize_heat_gains_from_heating_cooling(degrees_difference: list, power: 
     """
 
     # Need the output as an array
-    if isinstance(degrees_difference, float) or isinstance(degrees_difference, int):
-        degrees_difference = [degrees_difference]
-    if isinstance(power, float) or isinstance(power, int):
-        power = [power]
+    degrees_difference = ensure_list(degrees_difference)
+    power = ensure_list(power)
 
     # Normalized power
     zero_power = 0. - parameters['min_power'] / (parameters['max_power'] - parameters['min_power']) * 0.8 + 0.1
