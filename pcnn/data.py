@@ -1,9 +1,8 @@
 from loguru import logger
 import pandas as pd
 import numpy as np
-import torch
 
-from pcnn.util import normalize, inverse_normalize
+from pcnn.util import normalize, inverse_normalize, ensure_list
 
 
 class DataSet:
@@ -23,16 +22,15 @@ class DataSet:
             self.X_columns = data.columns
 
         self.Y_columns = data_kwargs['Y_columns']
+
+        data_kwargs = self.update_data_kwargs(data_kwargs)
         
         # Define all needed columns
-        self.case_column = data_kwargs['case_column'] if isinstance(data_kwargs['case_column'], list) else [data_kwargs['case_column']]
+        self.case_column = data_kwargs['case_column']
         self.out_column = data_kwargs['out_column']
-        if data_kwargs['neigh_column'] is not None:
-            self.neigh_column = data_kwargs['neigh_column'] if isinstance(data_kwargs['neigh_column'], list) else [data_kwargs['neigh_column']]
-        else:
-            self.neigh_column = data_kwargs['neigh_column']
-        self.temperature_column = data_kwargs['temperature_column'] if isinstance(data_kwargs['temperature_column'], list) else [data_kwargs['temperature_column']]
-        self.power_column = data_kwargs['power_column'] if isinstance(data_kwargs['power_column'], list) else [data_kwargs['power_column']]
+        self.neigh_column = data_kwargs['neigh_column']
+        self.temperature_column = data_kwargs['temperature_column']
+        self.power_column = data_kwargs['power_column']
         self.inputs_D = data_kwargs['inputs_D']
         self.topology = data_kwargs['topology']
 
@@ -48,15 +46,40 @@ class DataSet:
 
         logger.info(f"Inputs used in D:\n{np.array(self.X_columns)[self.inputs_D]}")
 
-        # Define inputs and labels
+        # Data arguments
         self.data = data
-        self.X = self.data[self.X_columns].iloc[:-1, :].copy().values
-        self.Y = self.data[self.Y_columns].iloc[1:, :].copy().values
         self.interval = (data.index[1] - data.index[0]).seconds / 60
 
         self.is_normalized = False
         self.min_ = None
         self.max_ = None
+        
+        # If normalization is wanted
+        if data_kwargs['to_normalize']:
+            if data_kwargs['verbose'] > 0:
+                logger.info("Normalizing the data...")
+            self.normalize()
+
+        # Define inputs and labels    
+        self.X = self.data[self.X_columns].iloc[:-1, :].copy().values
+        self.Y = self.data[self.Y_columns].iloc[1:, :].copy().values
+
+        self.data_kwargs = data_kwargs
+
+    def update_data_kwargs(self, data_kwargs: dict):
+
+        data_kwargs['case_column'] = ensure_list(data_kwargs['case_column'])
+        data_kwargs['neigh_column'] = ensure_list(data_kwargs['neigh_column'])
+        data_kwargs['temperature_column'] = ensure_list(data_kwargs['temperature_column']) 
+        data_kwargs['power_column'] = ensure_list(data_kwargs['power_column'])
+
+        data_kwargs['case_column'] = [i for i,x in enumerate(self.X_columns) if x in data_kwargs['case_column']]
+        data_kwargs['out_column'] = [i for i,x in enumerate(self.X_columns) if x == data_kwargs['out_column']][0]
+        data_kwargs['neigh_column'] = [i for i,x in enumerate(self.X_columns) if x in data_kwargs['neigh_column']]
+        data_kwargs['temperature_column'] = [i for i,x in enumerate(self.X_columns) if x in data_kwargs['temperature_column']]
+        data_kwargs['power_column'] = [i for i,x in enumerate(self.X_columns) if x in data_kwargs['power_column']]
+
+        return data_kwargs
 
     def normalize(self, data=None):
         """
@@ -186,12 +209,6 @@ def prepare_data(data: pd.DataFrame, data_kwargs: dict, verbose: int = 2):
     # Use the custom function to load and prepare the full dataset 
     data_kwargs['verbose'] = verbose
     dataset = DataSet(data=data.copy(), data_kwargs=data_kwargs)
-
-    # If normalization is wanted
-    if data_kwargs['to_normalize']:
-        if verbose > 0:
-            logger.info("Normalizing the data...")
-        dataset.normalize()
 
     if dataset.data.min().min() < 0.05:
         raise ValueError("The data needs to be normalized between 0.1 and 0.9. If it is not already the case, set `to_normalize=True` in the parameters to rescale it accordingly.")
