@@ -102,6 +102,7 @@ def inverse_normalize(data: Union[np.ndarray, pd.DataFrame, float], min_: Union[
 
     return data
 
+
 def model_save_name_factory(module, model_kwargs):
     """
     Function to create helpful and somewhat unique names to easily save and load the wanted models
@@ -155,6 +156,7 @@ def format_elapsed_time(tic, toc):
     # Final nice looking print
     return f"{hours}:{minutes}:{seconds}"
 
+
 def load_data(save_name: str, save_path: str = DATA_SAVE_PATH) -> pd.DataFrame:
     """
     Function to load a dataframe if it exists
@@ -174,6 +176,7 @@ def load_data(save_name: str, save_path: str = DATA_SAVE_PATH) -> pd.DataFrame:
 
     return data
 
+
 def check_GPU_availability():
     if torch.cuda.is_available():
         device = torch.device("cuda:0")
@@ -186,6 +189,7 @@ def check_GPU_availability():
         logger.info("Using CPU.")
     return device
 
+
 @contextmanager
 def elapsed_timer():
     start = default_timer()
@@ -193,3 +197,95 @@ def elapsed_timer():
     yield lambda: elapser()
     end = default_timer()
     elapser = lambda: end-start
+
+
+def ensure_list(value):
+    if value is not None:
+        if isinstance(value, list):
+            return value
+        else:
+            return [value]
+    else:
+        return None
+
+
+def initialize_heat_losses_from_temperature_differences(degrees_lost: list, temperature_difference: list, time_elapsed_hours: list, parameters: dict):
+    """
+    Function to compute the heat losses from temperature differences
+
+    Args:
+        degrees_lost:             List of the degrees lost per room
+        temperature_differences:  List of the temperature differences per room
+        time_elasped:             List of the time elapsed per room (in hours)
+        interval:                 Interval of the data (in hours)
+        min_temperature:          Minimum room temperature of the data
+        max_temperature:          Maximum room temperature of the data
+
+    Returns:
+        initial values for 'b' or 'c'
+    """
+
+    # Need the output as an array
+    if isinstance(degrees_lost, float) or isinstance(degrees_lost, int):
+        degrees_lost = [degrees_lost]
+    if isinstance(temperature_difference, float) or isinstance(temperature_difference, int):
+        temperature_difference = [temperature_difference]
+
+    # Heat losses approximation
+    # T_diff_inside ~ b * T_diff_outside * time_elapsed  (or c * T_diff_neighboring room * time_elapsed)
+    # --> b ~ T_diff_inside / T_diff_outside / time_elapsed (or c ~ T_diff_neighboring_room / T_diff_outside / time_elapsed)
+    initial_values = np.array(degrees_lost) / np.array(temperature_difference) / np.array(time_elapsed_hours)
+
+    # Discretization to the right interval
+    initial_values = initial_values / 60 * parameters['interval_minutes'] 
+
+    # Rescale to work with normalized data since PCNN predictions are betwween 0.1 and 0.9
+    # Note: there is no need to apply normalization to the temperature differnces here since
+    # the data is "unnormalized" in the PCNN modules during computation
+    initial_values = initial_values/ (parameters['max_temperature'] - parameters['min_temperature']) * 0.8
+
+    return initial_values
+
+
+def initialize_heat_gains_from_heating_cooling(degrees_difference: list, power: list, time_elapsed_hours: list, parameters: dict):
+    """
+    Function to compute the heat gains from power inputs
+
+    Args:
+        degrees_lost:             List of the degrees lost per room
+        temperature_differences:  List of the temperature differences per room
+        time_interval:            List of the time elapsed per room (in hours)
+        interval:                 Interval of the data (in minutes)
+        min_temperature:          Minimum room temperature of the data
+        max_temperature:          Maximum room temperature of the data
+        min_power:                Minimum power of the data
+        max_power:                Maximum power of the data
+
+    Returns:
+        initial values for 'a' or 'd'
+    """
+
+    # Need the output as an array
+    if isinstance(degrees_difference, float) or isinstance(degrees_difference, int):
+        degrees_difference = [degrees_difference]
+    if isinstance(power, float) or isinstance(power, int):
+        power = [power]
+
+    # Normalized power
+    zero_power = 0. - parameters['min_power'] / (parameters['max_power'] - parameters['min_power']) * 0.8 + 0.1
+    # Subtract the zero power tas this is what is actually input in E in the PCNN modules
+    power = np.array(power) - parameters['min_power'] / (parameters['max_power'] - parameters['min_power']) * 0.8 + 0.1 - zero_power
+
+    # Heat losses approximation
+    # T_diff_inside ~ a * power * time_elapsed 
+    # --> a ~ T_diff_inside / power / time_elapsed 
+    initial_values = np.array(degrees_difference) / power / np.array(time_elapsed_hours)
+
+    # Discretization to the right interval
+    initial_values = initial_values / 60 * parameters['interval_minutes'] 
+
+    # Rescale to work with normalized data since PCNN predictions and power inputs are betwween 0.1 and 0.9
+    initial_values = initial_values / (parameters['max_temperature'] - parameters['min_temperature']) * 0.8
+
+    # Cooling parameters must also be positive
+    return np.abs(initial_values)
