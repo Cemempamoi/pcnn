@@ -17,8 +17,7 @@ for path in [DATA_SAVE_PATH, MODEL_SAVE_PATH]:
     if not os.path.isdir(path):
         os.mkdir(path)
 
-def parameters(to_normalize: bool = True,
-                name: str = "Default_model", save_path: str = MODEL_SAVE_PATH,
+def parameters(name: str = "Default_model", save_path: str = MODEL_SAVE_PATH,
                 seed: int = 0, batch_size: int = 128, shuffle: bool = True, n_epochs: int = 20,
                 learning_rate: float = 0.05, decrease_learning_rate:bool = True,
                 heating: bool = True, cooling: bool = True, loss = F.mse_loss,
@@ -28,7 +27,7 @@ def parameters(to_normalize: bool = True,
                 input_nn_hidden_sizes: list = [128], lstm_hidden_size: int = 256,
                 layer_norm: bool = True, lstm_num_layers: int = 1,
                 output_nn_hidden_sizes: list = [128, 128], division_factor: float = 10.,
-                device: str = None, verbose: int = 2):
+                device: str = None, verbose: int = 2, eps: float = 1e-6):
     """
     Parameters of the models
 
@@ -60,6 +59,7 @@ def parameters(to_normalize: bool = True,
         output_nn_hidden_sizes:     Hidden sizes of the NNs processing the output
         division_factor:            Factor to scale the output of the networks to ease learning
         verbose:                    Verbose of the models
+        eps:                        Small value used for precision
     """
 
     assert cooling | heating, "At least heating or cooling needs to be true, otherwise nothing can be done"
@@ -79,7 +79,6 @@ def parameters(to_normalize: bool = True,
     return dict(name=name,
                 save_path=save_path,
                 seed=seed,
-                to_normalize=to_normalize,
                 heating=heating,
                 cooling=cooling,
                 loss=loss,
@@ -103,5 +102,6 @@ def parameters(to_normalize: bool = True,
                 output_nn_hidden_sizes=output_nn_hidden_sizes,
                 division_factor=division_factor,
                 device=device,
-                verbose=verbose)
+                verbose=verbose,
+                eps=eps)
 

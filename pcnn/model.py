@@ -56,8 +56,7 @@ class Model:
         data_kwargs = self.dataset.data_kwargs
 
         # Compute the scaled zero power points and the division factors 
-        model_kwargs['zero_power'] = self.dataset.compute_zero_power()
-        model_kwargs['normalization_variables'] = self.dataset.get_normalization_variables()
+        model_kwargs['temperature_min'], model_kwargs['temperature_range'] = self.dataset.get_temperarature_min_and_range()
 
         for key in model_kwargs['initial_values_physical_parameters']:
             model_kwargs['initial_values_physical_parameters'][key] = ensure_list(model_kwargs['initial_values_physical_parameters'][key])
@@ -762,6 +761,9 @@ class Model:
             {
                 "model_state_dict": self.model.state_dict(),
                 "optimizer_state_dict": self.optimizer.state_dict(),
+                "train_sequences": self.train_sequences,
+                "validation_sequences": self.validation_sequences,
+                "test_sequences": self.test_sequences,
                 "train_losses": self.train_losses,
                 "validation_losses": self.validation_losses,
                 "test_losses": self.test_losses,
@@ -811,6 +813,9 @@ class Model:
                     for k, v in state.items():
                         if isinstance(v, torch.Tensor):
                             state[k] = v.cuda()
+            self.train_sequences = checkpoint["train_sequences"]
+            self.validation_sequences = checkpoint["validation_sequences"]            
+            self.test_sequences = checkpoint["test_sequences"]
             self.train_losses = checkpoint["train_losses"]
             self.validation_losses = checkpoint["validation_losses"]
             self.test_losses = checkpoint["test_losses"]
