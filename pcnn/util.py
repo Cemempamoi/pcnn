@@ -201,7 +201,7 @@ def elapsed_timer():
 
 def ensure_list(value):
     if value is not None:
-        if isinstance(value, float) or isinstance(value, int):
+        if isinstance(value, float) or isinstance(value, int) or isinstance(value, str):
             return [value]
         else:
             return value
@@ -256,8 +256,6 @@ def initialize_heat_gains_from_heating_cooling(degrees_difference: list, power: 
         interval:                 Interval of the data (in minutes)
         min_temperature:          Minimum room temperature of the data
         max_temperature:          Maximum room temperature of the data
-        min_power:                Minimum power of the data
-        max_power:                Maximum power of the data
 
     Returns:
         initial values for 'a' or 'd'
@@ -267,20 +265,15 @@ def initialize_heat_gains_from_heating_cooling(degrees_difference: list, power: 
     degrees_difference = ensure_list(degrees_difference)
     power = ensure_list(power)
 
-    # Normalized power
-    zero_power = 0. - parameters['min_power'] / (parameters['max_power'] - parameters['min_power']) * 0.8 + 0.1
-    # Subtract the zero power tas this is what is actually input in E in the PCNN modules
-    power = np.array(power) - parameters['min_power'] / (parameters['max_power'] - parameters['min_power']) * 0.8 + 0.1 - zero_power
-
     # Heat losses approximation
     # T_diff_inside ~ a * power * time_elapsed 
     # --> a ~ T_diff_inside / power / time_elapsed 
-    initial_values = np.array(degrees_difference) / power / np.array(time_elapsed_hours)
+    initial_values = np.array(degrees_difference) / np.array(power) / np.array(time_elapsed_hours)
 
     # Discretization to the right interval
     initial_values = initial_values / 60 * parameters['interval_minutes'] 
 
-    # Rescale to work with normalized data since PCNN predictions and power inputs are betwween 0.1 and 0.9
+    # Rescale to work with normalized data since PCNN predictions are betwween 0.1 and 0.9
     initial_values = initial_values / (parameters['max_temperature'] - parameters['min_temperature']) * 0.8
 
     # Cooling parameters must also be positive

@@ -23,29 +23,6 @@ class DataSet:
 
         self.Y_columns = data_kwargs['Y_columns']
 
-        data_kwargs = self.update_data_kwargs(data_kwargs)
-        
-        # Define all needed columns
-        self.case_column = data_kwargs['case_column']
-        self.out_column = data_kwargs['out_column']
-        self.neigh_column = data_kwargs['neigh_column']
-        self.temperature_column = data_kwargs['temperature_column']
-        self.power_column = data_kwargs['power_column']
-        self.inputs_D = data_kwargs['inputs_D']
-        self.topology = data_kwargs['topology']
-
-        # Sanity check
-        if self.neigh_column is None:
-            logger.info(f'Sanity check of the columns:\n{[(w, [self.X_columns[i] for i in x]) 
-                                                          for w, x in zip(['Case', 'Room temp', 'Room power', 'Out temp'],
-                                    [self.case_column, self.temperature_column, self.power_column, [self.out_column]])]}')
-        else:
-            logger.info(f'Sanity check of the columns:\n{[(w, [self.X_columns[i] for i in x]) 
-                                                          for w, x in zip(['Case', 'Room temp', 'Room power', 'Out temp', 'Neigh temp'],
-                                    [self.case_column, self.temperature_column, self.power_column, [self.out_column], self.neigh_column])]}')
-
-        logger.info(f"Inputs used in D:\n{np.array(self.X_columns)[self.inputs_D]}")
-
         # Data arguments
         self.data = data
         self.interval = (data.index[1] - data.index[0]).seconds / 60
@@ -53,12 +30,23 @@ class DataSet:
         self.is_normalized = False
         self.min_ = None
         self.max_ = None
+
+        data_kwargs = self.ensure_columns_list(data_kwargs)
+
+        # Need to retain the names of the columns for later use
+        self.temperature_column_name = data_kwargs['temperature_column']
+
+        self.normalized_columns = self.get_columns_to_normalize(data_kwargs)
+        data_kwargs = self.get_columns_placements(data_kwargs)
+
+        # Sanity check
+        self.check_columns(data_kwargs)
         
-        # If normalization is wanted
-        if data_kwargs['to_normalize']:
-            if data_kwargs['verbose'] > 0:
-                logger.info("Normalizing the data...")
-            self.normalize()
+        # Normalizing the inputs to D and outputs
+        if data_kwargs['verbose'] > 0:
+            logger.info("Normalizing the data...")
+        # Order might matter
+        self.normalize(columns=self.normalized_columns)
 
         # Define inputs and labels    
         self.X = self.data[self.X_columns].iloc[:-1, :].copy().values
@@ -66,22 +54,52 @@ class DataSet:
 
         self.data_kwargs = data_kwargs
 
-    def update_data_kwargs(self, data_kwargs: dict):
-
+    def ensure_columns_list(self, data_kwargs: dict):
         data_kwargs['case_column'] = ensure_list(data_kwargs['case_column'])
         data_kwargs['neigh_column'] = ensure_list(data_kwargs['neigh_column'])
         data_kwargs['temperature_column'] = ensure_list(data_kwargs['temperature_column']) 
         data_kwargs['power_column'] = ensure_list(data_kwargs['power_column'])
+        return data_kwargs
+    
+    def get_columns_to_normalize(self, data_kwargs: dict):
+        """
+        Need to normalize the inputs to D, the outputs (temperatures), 
+        and the "case" column defining heating or cooling, as this is used
+        in module.py and expected to be between 0.1 (cooling) or 0.9 (heating)
+        """
+        return [x for x in self.data.columns if x in 
+                data_kwargs['inputs_D'] + data_kwargs['temperature_column'] + data_kwargs['case_column']]
 
+    def get_columns_placements(self, data_kwargs: dict):
+        """
+        Torch works with tensors, so we need to know which columns is where, i.e., get their index
+        """
         data_kwargs['case_column'] = [i for i,x in enumerate(self.X_columns) if x in data_kwargs['case_column']]
         data_kwargs['out_column'] = [i for i,x in enumerate(self.X_columns) if x == data_kwargs['out_column']][0]
         data_kwargs['neigh_column'] = [i for i,x in enumerate(self.X_columns) if x in data_kwargs['neigh_column']]
         data_kwargs['temperature_column'] = [i for i,x in enumerate(self.X_columns) if x in data_kwargs['temperature_column']]
         data_kwargs['power_column'] = [i for i,x in enumerate(self.X_columns) if x in data_kwargs['power_column']]
-
+        data_kwargs['inputs_D'] = [i for i,x in enumerate(self.X_columns) if x in data_kwargs['inputs_D']]
         return data_kwargs
+    
+    def check_columns(self, data_kwargs: dict):
+        """
+        Sanity check of the columns
+        """
+        if data_kwargs['neigh_column'] is None:
+            logger.info(f'Sanity check of the columns:\n{[(w, [self.X_columns[i] for i in x]) 
+                                                          for w, x in zip(['Case', 'Room temp', 'Room power', 'Out temp'],
+                                    [data_kwargs['case_column'], data_kwargs['temperature_column'], 
+                                     data_kwargs['power_column'], [data_kwargs['out_column']]])]}')
+        else:
+            logger.info(f'Sanity check of the columns:\n{[(w, [self.X_columns[i] for i in x]) 
+                                                          for w, x in zip(['Case', 'Room temp', 'Room power', 'Out temp', 'Neigh temp'],
+                                    [data_kwargs['case_column'], data_kwargs['temperature_column'], 
+                                     data_kwargs['power_column'], [data_kwargs['out_column']], data_kwargs['neigh_column']])]}')
 
-    def normalize(self, data=None):
+        logger.info(f"Inputs used in D:\n{np.array(self.X_columns)[data_kwargs['inputs_D']]}")
+
+    def normalize(self, data=None, columns=None):
         """
         Function to normalize the dataset, i.e. scale it by the min and max values
         The min and max of each column (sensor) is kept in memory to reverse the
@@ -104,8 +122,11 @@ class DataSet:
             self.is_normalized = True
             inplace = True
 
+        if columns is None:
+            columns = data.columns
+
         # Normalize the data and recall mins and maxes
-        data, min_, max_ = normalize(data)
+        data[columns], min_, max_ = normalize(data[columns])
 
         if inplace:
             self.data = data
@@ -114,7 +135,7 @@ class DataSet:
         else:
             return data, min_, max_
 
-    def inverse_normalize(self, data=None, min_=None, max_=None, inplace: bool = False):
+    def inverse_normalize(self, data=None, min_=None, max_=None, inplace: bool = False, columns=None):
         """
         Function to reverse the normalization to get the original scales back. If no data is provided,
         The entire data is scaled back.
@@ -128,6 +149,9 @@ class DataSet:
         Returns:
             Normalized data if wanted
         """
+
+        if columns is None:
+            columns = self.normalized_columns
 
         # If no data is provided, take the entire DataFrame of the DataSet
         if data is None:
@@ -152,7 +176,7 @@ class DataSet:
             max_ = self.max_[data_.columns]
 
         # Inverse the normalization using the needed mins and maxes
-        data = inverse_normalize(data=data_, min_=min_, max_=max_)
+        data[columns] = inverse_normalize(data=data_[columns], min_=min_, max_=max_)
 
         # Return the scaled data if wanted
         if inplace:
@@ -160,37 +184,13 @@ class DataSet:
         else:
             return data
         
-    def get_normalization_variables(self):
+    def get_temperarature_min_and_range(self):
         """
-        Function to get the minimum and the amplitude of some variables in the data. In particular, we need
-        that for the room temperature, the outside temperature and the neighboring room temperature.
+        Function to get the minimum and the amplitude of room temperatures.
         This is used by the physics-inspired network to unnormalize the predictions.
         """
-        normalization_variables = {}
-        normalization_variables['Room'] = [self.min_.iloc[self.temperature_column].values,
-                                           (self.max_ - self.min_).iloc[self.temperature_column].values]
-        if self.neigh_column is not None:
-            normalization_variables['Neigh'] = [self.min_.iloc[self.neigh_column].values,
-                                           (self.max_ - self.min_).iloc[self.neigh_column].values]
-        normalization_variables['Out'] = [[self.min_.iloc[self.out_column]],
-                                          [(self.max_ - self.min_).iloc[self.out_column]]]
-        return normalization_variables
-    
-    def compute_zero_power(self):
-        """
-        Small helper function to compute the scaled value of zero power
-        """
-
-        # Scale the zero
-        if self.is_normalized:
-            min_ = self.min_.iloc[self.power_column]
-            max_ = self.max_.iloc[self.power_column]
-            zero = 0.8 * (0.0 - min_) / (max_ - min_) + 0.1
-
-        else:
-            zero = np.array([0.0] * len(self.power_column))
-
-        return np.array(zero)
+        return self.min_.loc[self.temperature_column_name].values,\
+            (self.max_ - self.min_).loc[self.temperature_column_name].values
 
 
 def prepare_data(data: pd.DataFrame, data_kwargs: dict, verbose: int = 2):
@@ -209,9 +209,6 @@ def prepare_data(data: pd.DataFrame, data_kwargs: dict, verbose: int = 2):
     # Use the custom function to load and prepare the full dataset 
     data_kwargs['verbose'] = verbose
     dataset = DataSet(data=data.copy(), data_kwargs=data_kwargs)
-
-    if dataset.data.min().min() < 0.05:
-        raise ValueError("The data needs to be normalized between 0.1 and 0.9. If it is not already the case, set `to_normalize=True` in the parameters to rescale it accordingly.")
 
     assert len(dataset.X) == len(dataset.Y), "Something weird happened!"
 

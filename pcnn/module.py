@@ -92,20 +92,16 @@ class PCNN(nn.Module):
         self.power_column = kwargs['power_column']
         self.out_column = kwargs['out_column']
         self.neigh_column = kwargs['neigh_column']
-        self.zero_power = torch.Tensor(kwargs['zero_power']).to(self.device)
         self.division_factor = torch.Tensor(kwargs['division_factor']).to(self.device)
+        self.eps = kwargs['eps']
 
         # Define latent variables
         self.last_D = None  ## D
         self.last_E = None  ## E
 
         # Recall normalization constants
-        self.room_min = torch.Tensor(kwargs['normalization_variables']['Room'][0]).to(self.device)
-        self.room_diff = torch.Tensor(kwargs['normalization_variables']['Room'][1]).to(self.device)
-        self.neigh_min = torch.Tensor(kwargs['normalization_variables']['Neigh'][0]).to(self.device)
-        self.neigh_diff = torch.Tensor(kwargs['normalization_variables']['Neigh'][1]).to(self.device)
-        self.out_min = torch.Tensor(kwargs['normalization_variables']['Out'][0]).to(self.device)
-        self.out_diff = torch.Tensor(kwargs['normalization_variables']['Out'][1]).to(self.device)
+        self.temperature_min = torch.Tensor(kwargs['temperature_min']).to(self.device)
+        self.temperature_range = torch.Tensor(kwargs['temperature_range']).to(self.device)
         
         # Initial values for the physical parameters `a`, `b`, `c`, `d`
         self.initial_value_a = torch.Tensor(kwargs['initial_values_physical_parameters']['a']).to(self.device)
@@ -240,44 +236,25 @@ class PCNN(nn.Module):
 
         # Loss to the outside is b*(T_k-T^out_k)
         if self.out_column is not None:
-            E = E.clone() - self.b(
-                ((x[:, -1, self.temperature_column] + self.last_E.clone() - 0.1) / 0.8
-                  * self.room_diff + self.room_min)
-                 - ((x[:, -1, [self.out_column]] - 0.1) / 0.8
-                    * self.out_diff + self.out_min)) * self.initial_value_b
+            E = E.clone() - self.b(((x[:, -1, self.temperature_column] + self.last_E.clone() # T = D+E
+                                     - 0.1) / 0.8 * self.temperature_range + self.temperature_min) # Unnormalize it back to the original scale
+                                     - (x[:, -1, [self.out_column]])) * self.initial_value_b # -T_out and scale by initial value of b
 
         # Loss to the neighboring zone is c*(T_k-T^neigh_k)
-        E = E.clone() - self.c(
-            (((x[:, -1, self.temperature_column]+ self.last_E.clone() - 0.1) / 0.8
-                * self.room_diff + self.room_min)
-            - ((x[:, -1, self.neigh_column] - 0.1) / 0.8
-                * self.neigh_diff + self.neigh_min))) * self.initial_value_c
+        E = E.clone() - self.c(((x[:, -1, self.temperature_column] + self.last_E.clone() # T = D+E
+                                 - 0.1) / 0.8 * self.temperature_range + self.temperature_min) # Unnormalize it back to the original scale
+                                 - (x[:, -1, self.neigh_column] )) * self.initial_value_c # -T_neigh and scale by initial value of c
 
         ## Heating/cooling effect of HVAC on 'E'
-
         # Find sequences in the batch where there actually is heating/cooling
-        # Trick needed to put padded values back to zero power before detecting power intputs
-        temp = torch.where(x[:, :, self.power_column] > 0.05, x[:, :, self.power_column], self.zero_power)
-        mask = torch.any(torch.any(torch.where(torch.abs(temp - self.zero_power) > 1e-6, True, False), axis=1), axis=1)
+        power = x[:, -1, self.power_column].clone()
+        heating = torch.any(power > self.eps, axis=1)
+        cooling = torch.any(power < -self.eps, axis=1)
 
-        if sum(mask) > 0:
-
-            # Find heating and cooling sequences
-            heating = torch.any(x[:, 0, self.case_column] > 0.5, axis=1)
-            cooling = torch.any(x[:, 0, self.case_column] < 0.5, axis=1)
-
-            # Substract the 'zero power' to get negative values for cooling power
-            power = x[:, :, self.power_column].clone() - self.zero_power
-
-            if sum(heating) > 0:
-                # Heating effect: add a*u to 'E'$
-                heating_power = torch.where(power > self.zero_power, power, self.zero_power)[mask&heating,:]
-                E[mask & heating] = E[mask & heating].clone() + self.a(heating_power).squeeze(-1) * self.initial_value_a
-
-            if sum(cooling) > 0:
-                # Cooling effect: add d*u (where u<0 now, so we actually subtract energy) to 'E'
-                cooling_power = torch.where(power < self.zero_power, power, self.zero_power)[mask&cooling,:]
-                E[mask & cooling] = E[mask & cooling].clone() + self.d(cooling_power).squeeze(-1) * self.initial_value_d
+        if sum(heating) > 0:
+            E[heating] = E[heating].clone() + self.a(power[heating]) * self.initial_value_a
+        if sum(cooling) > 0:
+            E[cooling] = E[cooling].clone() + self.d(power[cooling]) * self.initial_value_d
 
         # Recall 'D' and 'E' for the next time step
         self.last_D = D.clone()
