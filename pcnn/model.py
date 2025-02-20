@@ -18,7 +18,8 @@ import torch.nn.functional as F
 
 from pcnn.module import PCNN, S_PCNN, M_PCNN, LSTM
 from pcnn.data import prepare_data
-from pcnn.util import model_save_name_factory, format_elapsed_time, inverse_normalize, check_GPU_availability, elapsed_timer, ensure_list
+from pcnn.util import model_save_name_factory, format_elapsed_time, inverse_normalize, check_GPU_availability, \
+    elapsed_timer, ensure_list, check_initialization_physical_parameters
 
 
 class Model:
@@ -26,7 +27,7 @@ class Model:
     Class of models using PyTorch
     """
 
-    def __init__(self, data: pd.DataFrame, module: str, model_kwargs: dict, data_kwargs: dict, 
+    def __init__(self, data: pd.DataFrame, module: str, model_params: dict, data_params: dict, 
                  load: bool = True, load_last: bool = False):
         """
         Initialize a model.
@@ -40,14 +41,16 @@ class Model:
             load_last:      Whether to load the last model or not
         """
 
+        data_kwargs = data_params.copy()
+        model_kwargs = model_params.copy()
+
         assert module in ['PCNN', 'S_PCNN', 'M_PCNN', 'LSTM'],\
             f"The provided model type {module} does not exist, please chose among `'PCNN', 'S_PCNN', 'M_PCNN', 'LSTM'`."
 
         # Define the main attributes
         self.module = module
-        self.number_rooms = len(data_kwargs['Y_columns'])
+        self.number_rooms = len(ensure_list(data_kwargs['temperature_column']))
         model_kwargs['number_rooms'] = self.number_rooms
-
         self.verbose = model_kwargs["verbose"]
 
         # Prepare the data
@@ -93,6 +96,12 @@ class Model:
         self.test_percentage = model_kwargs["test_percentage"]
 
         self.case_column = data_kwargs['case_column']
+        data_kwargs['outside_walls'] =  ensure_list(data_kwargs['outside_walls'])
+        data_kwargs['neighboring_rooms'] = ensure_list(data_kwargs['neighboring_rooms'])
+
+        # Snaity check
+        check_initialization_physical_parameters(initial_values_physical_parameters=model_kwargs['initial_values_physical_parameters'],
+                                                data_params=data_kwargs)
 
         # Prepare the torch module
         # Group parameters for simplicity
@@ -114,6 +123,16 @@ class Model:
         self.model_kwargs = model_kwargs
         self.data_kwargs = data_kwargs
 
+        # Prepare the lists to store progress
+        self.train_losses = []
+        self.validation_losses = []
+        self.test_losses = []
+        self.a = []
+        self.b = []
+        self.c = []
+        self.d = []
+        self.times = []
+
         # Load the model if it exists
         self.train_sequences = None
         if load:
@@ -127,16 +146,6 @@ class Model:
 
         # Push everything to the right device
         self.model = self.model.to(self.device)
-
-        # Prepare the lists to store progress
-        self.train_losses = []
-        self.validation_losses = []
-        self.test_losses = []
-        self.a = []
-        self.b = []
-        self.c = []
-        self.d = []
-        self.times = []
 
     @property
     def X(self):
@@ -826,12 +835,21 @@ class Model:
             self.d = checkpoint["d"]
             for key in self.model_kwargs:
                 if key in checkpoint['model_kwargs']:
-                    if self.model_kwargs[key] != checkpoint['model_kwargs'][key]:
-                        logger.warning(f"The parameter {key} was found in the checkpoint but with a different value than the one used to train the model. The checkpoint value is used.")
+                    if isinstance(self.model_kwargs[key], dict):
+                        for x,y in zip(self.model_kwargs[key].keys(), checkpoint['model_kwargs'][key].keys()):
+                            if isinstance(self.model_kwargs[key][x], list):
+                                for a,b in zip(self.model_kwargs[key][x], checkpoint['model_kwargs'][key][y]):
+                                    if a != b:
+                                        logger.warning(f"The parameter {key} was found in the checkpoint as {checkpoint['model_kwargs'][key]} "
+                                            f"while you passed {self.model_kwargs[key]}. The checkpoint value is used for compliance with the model found.")
+                    elif np.any(self.model_kwargs[key] != checkpoint['model_kwargs'][key]):
+                        logger.warning(f"The parameter {key} was found in the checkpoint as {checkpoint['model_kwargs'][key]} "
+                                       f"while you passed {self.model_kwargs[key]}. The checkpoint value is used for compliance with the model found.")
             for key in self.data_kwargs:
                 if key in checkpoint['data_kwargs']:
-                    if self.data_kwargs[key] != checkpoint['data_kwargs'][key]: 
-                        logger.warning(f"The parameter {key} was found in the checkpoint but with a different value than the one used to train the model. The checkpoint value is used.")
+                    if np.any(self.data_kwargs[key] != checkpoint['data_kwargs'][key]):  
+                        logger.warning(f"The parameter {key} was found in the checkpoint as {checkpoint['data_kwargs'][key]} "
+                                       f"while you passed {self.data_kwargs[key]}. The checkpoint value is used for compliance with the model found.")
             self.model_kwargs = checkpoint["model_kwargs"]
             self.data_kwargs = checkpoint["data_kwargs"]
 
