@@ -11,41 +11,39 @@ class DataSet:
         if data_kwargs['verbose'] > 0:
             logger.info("Preparing the data...")
 
+        # Ensure compatibility
+        data_kwargs = self.ensure_columns_list(data_kwargs)
+        # Need to retain the names of the columns for later use
+        self.temperature_column_name = data_kwargs['temperature_column']
+
         # Only keep useful columns
-        X_columns = data_kwargs['X_columns'] 
-        if X_columns is not None:
-            to_keep = [x for x in data.columns if x in list(set(X_columns) | set(data_kwargs['Y_columns']))]
-            data.drop(columns=[x for x in data.columns if x not in to_keep], inplace=True)
-            # Reorder the columns to ensure they are in the right order
-            self.X_columns = [x for x in data.columns if x in X_columns]
-        else:
-            self.X_columns = data.columns
-
-        self.Y_columns = data_kwargs['Y_columns']
-
+        self.X_columns = data_kwargs['temperature_column'] + data_kwargs['power_column'] + [data_kwargs['out_column']] \
+                        + data_kwargs['inputs_D'] + data_kwargs['case_column'] 
+        if data_kwargs['neigh_column'] is not None:
+            self.X_columns += data_kwargs['neigh_column']
+        
+        self.Y_columns = data_kwargs['temperature_column']
+        
         # Data arguments
-        self.data = data
+        self.data = data[self.X_columns].copy()
         self.interval = (data.index[1] - data.index[0]).seconds / 60
 
         self.is_normalized = False
         self.min_ = None
         self.max_ = None
 
-        data_kwargs = self.ensure_columns_list(data_kwargs)
-
-        # Need to retain the names of the columns for later use
-        self.temperature_column_name = data_kwargs['temperature_column']
-
+        # Get which column to normalize
         self.normalized_columns = self.get_columns_to_normalize(data_kwargs)
-        data_kwargs = self.get_columns_placements(data_kwargs)
+        
+        # For compatibility with torch, need the columns indices
+        data_kwargs = self.get_columns_indices(data_kwargs)
 
-        # Sanity check
+        # Sanity check after this modifications
         self.check_columns(data_kwargs)
         
-        # Normalizing the inputs to D and outputs
+        # Normalizing the inputs to D, outputs and the "case" column defining heating or cooling
         if data_kwargs['verbose'] > 0:
             logger.info("Normalizing the data...")
-        # Order might matter
         self.normalize(columns=self.normalized_columns)
 
         # Define inputs and labels    
@@ -68,15 +66,16 @@ class DataSet:
         in module.py and expected to be between 0.1 (cooling) or 0.9 (heating)
         """
         return [x for x in self.data.columns if x in 
-                data_kwargs['inputs_D'] + data_kwargs['temperature_column'] + data_kwargs['case_column']]
+                data_kwargs['temperature_column'] + data_kwargs['inputs_D'] + data_kwargs['case_column']]
 
-    def get_columns_placements(self, data_kwargs: dict):
+    def get_columns_indices(self, data_kwargs: dict):
         """
         Torch works with tensors, so we need to know which columns is where, i.e., get their index
         """
         data_kwargs['case_column'] = [i for i,x in enumerate(self.X_columns) if x in data_kwargs['case_column']]
         data_kwargs['out_column'] = [i for i,x in enumerate(self.X_columns) if x == data_kwargs['out_column']][0]
-        data_kwargs['neigh_column'] = [i for i,x in enumerate(self.X_columns) if x in data_kwargs['neigh_column']]
+        if data_kwargs['neigh_column'] is not None:
+            data_kwargs['neigh_column'] = [i for i,x in enumerate(self.X_columns) if x in data_kwargs['neigh_column']]
         data_kwargs['temperature_column'] = [i for i,x in enumerate(self.X_columns) if x in data_kwargs['temperature_column']]
         data_kwargs['power_column'] = [i for i,x in enumerate(self.X_columns) if x in data_kwargs['power_column']]
         data_kwargs['inputs_D'] = [i for i,x in enumerate(self.X_columns) if x in data_kwargs['inputs_D']]
@@ -126,7 +125,8 @@ class DataSet:
             columns = data.columns
 
         # Normalize the data and recall mins and maxes
-        data[columns], min_, max_ = normalize(data[columns])
+        normalized_data, min_, max_ = normalize(data[columns])
+        data[columns] = normalized_data.values
 
         if inplace:
             self.data = data
@@ -176,7 +176,8 @@ class DataSet:
             max_ = self.max_[data_.columns]
 
         # Inverse the normalization using the needed mins and maxes
-        data[columns] = inverse_normalize(data=data_[columns], min_=min_, max_=max_)
+        inverse_data = inverse_normalize(data=data_[columns], min_=min_, max_=max_)
+        data[columns] = inverse_data.values
 
         # Return the scaled data if wanted
         if inplace:
@@ -208,7 +209,7 @@ def prepare_data(data: pd.DataFrame, data_kwargs: dict, verbose: int = 2):
 
     # Use the custom function to load and prepare the full dataset 
     data_kwargs['verbose'] = verbose
-    dataset = DataSet(data=data.copy(), data_kwargs=data_kwargs)
+    dataset = DataSet(data=data, data_kwargs=data_kwargs)
 
     assert len(dataset.X) == len(dataset.Y), "Something weird happened!"
 
