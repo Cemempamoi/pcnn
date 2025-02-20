@@ -204,54 +204,126 @@ def ensure_list(value):
         if isinstance(value, float) or isinstance(value, int) or isinstance(value, str):
             return [value]
         else:
-            return value
+            if isinstance(value, pd.Series):
+                return value.values
+            else:
+                return value
     else:
         return None
 
 
-def initialize_heat_losses_from_temperature_differences(degrees_lost: list, temperature_difference: list, time_elapsed_hours: list, parameters: dict):
+def common_initialization(temperature_difference, factor, time_elapsed_hours, parameters):
     """
-    Function to compute the heat losses from temperature differences
+    Function to compute the common initialization of the physical parameters
 
     Args:
-        degrees_lost:             List of the degrees lost per room
-        temperature_differences:  List of the temperature differences per room
-        time_elasped:             List of the time elapsed per room (in hours)
-        interval:                 Interval of the data (in hours)
-        min_temperature:          Minimum room temperature of the data
-        max_temperature:          Maximum room temperature of the data
+        temperature_difference:         List of the temperature differences per room
+        factor:                         Factor causing the observed differences, also as a lit
+        time_elasped:                   List of the time elapsed per room (in hours)
+        max_temperature:                Maximum room temperature of the data
+        min_temperature:                Minimum room temperature of the data
 
     Returns:
-        initial values for 'b' or 'c'
+        basic initialization values to be standardized
     """
 
     # Need the output as an array
-    degrees_lost = ensure_list(degrees_lost)
     temperature_difference = ensure_list(temperature_difference)
+    factor = ensure_list(factor)
+    # For robustness in case a Series is passed
+    max_temperature = np.array(ensure_list(parameters['max_temperature'])) 
+    min_temperature = np.array(ensure_list(parameters['min_temperature'])) 
 
-    # Heat losses approximation
-    # T_diff_inside ~ b * T_diff_outside * time_elapsed  (or c * T_diff_neighboring room * time_elapsed)
+    ## Heat losses approximation
+    
+    # T_diff_inside ~ b * T_diff_outside * time_elapsed  (or c * T_diff_neighboring_oom * time_elapsed)
     # --> b ~ T_diff_inside / T_diff_outside / time_elapsed (or c ~ T_diff_neighboring_room / T_diff_outside / time_elapsed)
-    initial_values = np.array(degrees_lost) / np.array(temperature_difference) / np.array(time_elapsed_hours)
+    
+    # or # T_diff_inside ~ a * power * time_elapsed (or T_diff_inside ~ d * power * time_elapsed)
+    # --> a ~ T_diff_inside / power / time_elapsed (or d ~ T_diff_inside / power / time_elapsed)
+    initial_values = np.array(temperature_difference) / np.array(factor) / np.array(time_elapsed_hours)
 
     # Discretization to the right interval
     initial_values = initial_values / 60 * parameters['interval_minutes'] 
 
+    return initial_values, max_temperature, min_temperature
+
+
+def initialize_heat_losses_to_outside(temperature_difference: list, temperature_difference_to_outsie: list, time_elapsed_hours: list, parameters: dict):
+    """
+    Function to compute the heat losses from temperature differences
+
+    Args:
+        temperature_difference:             List of the temperature differences per room
+        temperature_difference_to_outsie:   List of the temperature differences per room
+        time_elasped:                       List of the time elapsed per room (in hours)
+        interval:                           Interval of the data (in hours)
+        min_temperature:                    Minimum room temperature of the data        
+        max_temperature:                    Maximum room temperature of the data
+
+    Returns:
+        initial values for 'b' 
+    """
+
+    initial_values, max_temperature, min_temperature = common_initialization(temperature_difference=temperature_difference, 
+                                                                             factor=temperature_difference_to_outsie, 
+                                                                             time_elapsed_hours=time_elapsed_hours, 
+                                                                             parameters=parameters)
+     
     # Rescale to work with normalized data since PCNN predictions are betwween 0.1 and 0.9
-    # Note: there is no need to apply normalization to the temperature differnces here since
-    # the data is "unnormalized" in the PCNN modules during computation
-    initial_values = initial_values/ (parameters['max_temperature'] - parameters['min_temperature']) * 0.8
+    initial_values = initial_values / (max_temperature - min_temperature) * 0.8
 
-    return initial_values
+    return ensure_list(initial_values)
+    
+
+def initialize_heat_losses_to_neighbors(neighboring_rooms: list, temperature_difference: list, temperature_difference_to_neighbors: list, time_elapsed_hours: list, parameters: dict):
+    """
+    Function to compute the heat losses from temperature differences
+
+    Args:
+        neighboring_rooms:                      List of the pairs of neighboring rooms - if None then assumes single-zone PCNN
+        temperature_difference:                 List of the degrees lost per room
+        temperature_difference_to_neighbors:    List of the temperature differences per room
+        time_elasped:                           List of the time elapsed per room (in hours)
+        interval:                               Interval of the data (in hours)
+        min_temperature:                        Minimum room temperature of the data
+        max_temperature:                        Maximum room temperature of the data
+
+    Returns:
+        initial values for 'b' 
+    """
+
+    initial_values, max_temperature, min_temperature = common_initialization(temperature_difference=temperature_difference,
+                                                                             factor=temperature_difference_to_neighbors,
+                                                                             time_elapsed_hours=time_elapsed_hours,
+                                                                             parameters=parameters)
+
+    # Need to ensure right normalization for neighboring rooms having different temperature ranges
+    # To correctly initialize 'c'
+    if neighboring_rooms is not None:
+        initial_values_split = [[], []]
+        # Ensure we have the right number of initial values (if all the same)
+        if len(initial_values) == 1:
+            initial_values = list(initial_values) * len(neighboring_rooms)
+        # Loop over the pairs of rooms and create two lists to have the right normalization for each room
+        for i, (room1, room2) in enumerate(neighboring_rooms):
+            initial_values_split[0].append(initial_values[i] / (max_temperature[room1] - min_temperature[room1]) * 0.8)
+            initial_values_split[1].append(initial_values[i] / (max_temperature[room2] - min_temperature[room2]) * 0.8)
+        initial_values = initial_values_split
+
+    else:
+        initial_values = initial_values / (max_temperature - min_temperature) * 0.8
+
+    return ensure_list(initial_values)
 
 
-def initialize_heat_gains_from_heating_cooling(degrees_difference: list, power: list, time_elapsed_hours: list, parameters: dict):
+def initialize_heat_gains_from_heating_cooling(temperature_difference: list, power: list, time_elapsed_hours: list, parameters: dict):
     """
     Function to compute the heat gains from power inputs
 
     Args:
         degrees_lost:             List of the degrees lost per room
-        temperature_differences:  List of the temperature differences per room
+        power:                    List of the power consumption per room during that time
         time_interval:            List of the time elapsed per room (in hours)
         interval:                 Interval of the data (in minutes)
         min_temperature:          Minimum room temperature of the data
@@ -261,20 +333,31 @@ def initialize_heat_gains_from_heating_cooling(degrees_difference: list, power: 
         initial values for 'a' or 'd'
     """
 
-    # Need the output as an array
-    degrees_difference = ensure_list(degrees_difference)
-    power = ensure_list(power)
-
-    # Heat losses approximation
-    # T_diff_inside ~ a * power * time_elapsed 
-    # --> a ~ T_diff_inside / power / time_elapsed 
-    initial_values = np.array(degrees_difference) / np.array(power) / np.array(time_elapsed_hours)
-
-    # Discretization to the right interval
-    initial_values = initial_values / 60 * parameters['interval_minutes'] 
+    initial_values, max_temperature, min_temperature = common_initialization(temperature_difference=temperature_difference, 
+                                                                              factor=power, 
+                                                                              time_elapsed_hours=time_elapsed_hours, 
+                                                                              parameters=parameters)
 
     # Rescale to work with normalized data since PCNN predictions are betwween 0.1 and 0.9
-    initial_values = initial_values / (parameters['max_temperature'] - parameters['min_temperature']) * 0.8
+    initial_values = initial_values / (max_temperature - min_temperature) * 0.8
 
     # Cooling parameters must also be positive
-    return np.abs(initial_values)
+    return np.abs(ensure_list(initial_values))
+
+
+def check_initialization_physical_parameters(initial_values_physical_parameters, data_params):
+    """
+    Function to check the initialization of the physical parameters
+    """
+    assert len(initial_values_physical_parameters['a']) == len(data_params['temperature_column']), \
+        f"The initial value of a is not the right size! You have {len(data_params['temperature_column'])} rooms but {len(initial_values_physical_parameters['a'])} initial values."
+    assert len(initial_values_physical_parameters['b']) == len(data_params['outside_walls']), \
+        f"The initial value of b is not the right size! You have {len(data_params['outside_walls'])} walls but {len(initial_values_physical_parameters['b'])} initial values."
+    if data_params['neighboring_rooms'] is not None:
+        assert len(initial_values_physical_parameters['c']) == len(data_params['neighboring_rooms']), \
+            f"The initial value of c is not the right size! You have {len(data_params['neighboring_rooms'])} pairs of rooms but {len(initial_values_physical_parameters['c'])} initial values."
+    elif data_params['neigh_column'] is not None:
+        assert len(initial_values_physical_parameters['c']) == len(data_params['neigh_column']), \
+            f"The initial value of c is not the right size! You have {len(data_params['neigh_column'])} pairs of rooms but {len(initial_values_physical_parameters['c'])} initial values."
+    assert len(initial_values_physical_parameters['d']) == len(data_params['temperature_column']), \
+        f"The initial value of d is not the right size! You have {len(data_params['temperature_column'])} rooms but {len(initial_values_physical_parameters['d'])} initial values."
