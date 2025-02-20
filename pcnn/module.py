@@ -26,6 +26,24 @@ class PositiveLinear(nn.Module):
         else:
             return nn.functional.linear(input, self.log_weight.exp())
 
+        
+class DiagonalPositiveLinear(nn.Module):
+    """
+    https://discuss.pytorch.org/t/positive-weights/19701/7
+    Adapted to be diagonal for parallelization of the physical module
+    """
+    def __init__(self, features):
+        super(DiagonalPositiveLinear, self).__init__()
+        self.features = features
+        self.log_weight = nn.Parameter(torch.Tensor(features))
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        nn.init.constant_(self.log_weight, 0.)
+
+    def forward(self, input):
+        return nn.functional.linear(input, torch.diag(self.log_weight.exp()))
+
 
 class PCNN(nn.Module):
     """
@@ -122,11 +140,11 @@ class PCNN(nn.Module):
         """
 
         ## Initialization of the parameters of `E`
-        self.a = PositiveLinear(len(self.power_column), 1, require_bias=False)
-        self.b = PositiveLinear(1, 1, require_bias=False)
+        self.a = DiagonalPositiveLinear(len(self.power_column))
+        self.b = DiagonalPositiveLinear(1)
         if self.neigh_column is not None:
-            self.c = PositiveLinear(len(self.neigh_column), 1, require_bias=False)
-        self.d = PositiveLinear(len(self.power_column), 1, require_bias=False)
+            self.c = DiagonalPositiveLinear(len(self.neigh_column))
+        self.d = DiagonalPositiveLinear(len(self.power_column))
 
         ## Initialization of `D`
         # Hidden and cell state initialization
@@ -308,8 +326,6 @@ class S_PCNN(nn.Module):
             temperature_column:         Index of the column corresponding to the room temperature
             power_column:               Index of the column corresponding to the power consumption
             out_column:                 Index of the column corresponding to the outside temperature
-            zero_power:                 Scaled value of zero heating/cooling power. This is needed since the
-                                          model should predict no power consumption if the valves stay closed
             division_factor:            Factors to scale the base predictions and ensure not too big differences
                                           between timesteps
             normalization_variables:    Minimum and differences of various parameters in the data, so that we can
@@ -336,24 +352,32 @@ class S_PCNN(nn.Module):
         self.temperature_column = kwargs['temperature_column']
         self.power_column = kwargs['power_column']
         self.out_column = kwargs['out_column']
-        self.zero_power = torch.Tensor(kwargs['zero_power']).to(self.device)
         self.division_factor = torch.Tensor(kwargs['division_factor']).to(self.device)
-        self.topology = kwargs['topology']
+        self.eps = kwargs['eps']
+        self.number_rooms = kwargs['number_rooms']
+        self.outside_walls = kwargs['outside_walls']
+        
+        # Record paris of connected rooms
+        self.neighboring_rooms_1 = [x[0] for x in kwargs['neighboring_rooms']]
+        self.neighboring_rooms_2 = [x[1] for x in kwargs['neighboring_rooms']]
+
+        # Record which rooms have an external walls in the data
+        self.temperature_column_outside_walls = list(np.array(self.temperature_column)[self.outside_walls])
 
         # Define latent variables
         self.last_D = None  ## D
         self.last_E = None  ## E
 
         # Recall normalization constants
-        self.room_min = torch.Tensor(kwargs['normalization_variables']['Room'][0]).to(self.device)
-        self.room_diff = torch.Tensor(kwargs['normalization_variables']['Room'][1]).to(self.device)
-        self.out_min = torch.Tensor(kwargs['normalization_variables']['Out'][0]).to(self.device)
-        self.out_diff = torch.Tensor(kwargs['normalization_variables']['Out'][1]).to(self.device)
+        self.temperature_min = torch.Tensor(kwargs['temperature_min']).to(self.device)
+        self.temperature_range = torch.Tensor(kwargs['temperature_range']).to(self.device)
         
         # Initial values for the physical parameters `a`, `b`, `c`, `d`
         self.initial_value_a = torch.Tensor(kwargs['initial_values_physical_parameters']['a']).to(self.device)
         self.initial_value_b = torch.Tensor(kwargs['initial_values_physical_parameters']['b']).to(self.device)
-        self.initial_value_c = torch.Tensor(kwargs['initial_values_physical_parameters']['c']).to(self.device)
+        # For parallelization
+        self.initial_value_c_1 = torch.Tensor(kwargs['initial_values_physical_parameters']['c'][0]).to(self.device)
+        self.initial_value_c_2 = torch.Tensor(kwargs['initial_values_physical_parameters']['c'][1]).to(self.device)
         self.initial_value_d = torch.Tensor(kwargs['initial_values_physical_parameters']['d']).to(self.device)
 
         # Build the models
@@ -369,11 +393,10 @@ class S_PCNN(nn.Module):
         """
 
         ## Initialization of the parameters of `E`
-        self.a = PositiveLinear(len(self.topology['Rooms']), 1, require_bias=False)
-        self.b = PositiveLinear(len(self.topology['Outside']), 1, require_bias=False)
-        self.c = nn.ModuleList(
-            [PositiveLinear(1, 1, require_bias=False) for _ in range(len(self.topology['Neighbors']))])
-        self.d = PositiveLinear(len(self.topology['Rooms']), 1, require_bias=False)
+        self.a = DiagonalPositiveLinear(self.number_rooms)
+        self.b = DiagonalPositiveLinear(len(self.outside_walls))
+        self.c = DiagonalPositiveLinear(len(self.neighboring_rooms_1))
+        self.d = DiagonalPositiveLinear(self.number_rooms)
 
         ## Initialization of `D`
         # Hidden and cell state initialization
@@ -395,10 +418,10 @@ class S_PCNN(nn.Module):
             self.norm = nn.LayerNorm(normalized_shape=self.lstm_hidden_size)
 
         # Create the NNs to process the output of the LSTMs for each modules if wanted
-        sizes = [self.lstm_hidden_size] + self.output_nn_hidden_sizes + [len(self.topology['Rooms'])]
+        sizes = [self.lstm_hidden_size] + self.output_nn_hidden_sizes + [self.number_rooms]
         self.output_nn = nn.ModuleList([nn.Sequential(nn.Linear(sizes[i], sizes[i + 1]), nn.Tanh())
                                                 for i in range(0, len(sizes) - 1)])
-
+        
         # Xavier initialization of all the weights of NNs, parameters `a`, `b`, `c`, `d` are set to 1
         for name, param in self.named_parameters():
             if 'norm' not in name:
@@ -447,8 +470,8 @@ class S_PCNN(nn.Module):
                 c = torch.zeros((self.lstm_num_layers, x.shape[0], self.lstm_hidden_size)).to(self.device)
 
             # Define vectors to store 'D' and 'E', which will evolve through time
-            self.last_D = torch.zeros((x.shape[0], len(self.topology['Rooms']))).to(self.device)  ## D
-            self.last_E = torch.zeros((x.shape[0], len(self.topology['Rooms']))).to(self.device)  ## E
+            self.last_D = torch.zeros((x.shape[0], self.number_rooms)).to(self.device)  ## D
+            self.last_E = torch.zeros((x.shape[0], self.number_rooms)).to(self.device)  ## E
 
         # Use the last base predictions as input when not warm starting, otherwise we keep the true temperature
         if not warm_start:
@@ -481,51 +504,33 @@ class S_PCNN(nn.Module):
         E = self.last_E.clone()  
 
         # Loss to the outside is b*(T_k-T^out_k)
-        E[:, self.topology['Outside']] = E[:, self.topology['Outside']].clone() - self.b(
-            (((x[:, -1, self.temperature_column[self.topology['Outside']]]
-                + self.last_E[:, self.topology['Outside']].clone() - 0.1) / 0.8
-                * self.room_diff[self.topology['Outside']] + self.room_min[self.topology['Outside']])
-                - ((x[:, -1, self.out_column] - 0.1) / 0.8
-                * self.out_diff + self.out_min)).
-                reshape(-1, 1)).squeeze() * self.initial_value_b
+        E[:, self.outside_walls] = E[:, self.outside_walls].clone() - self.b( # Only consider rooms with an external wall
+            ((x[:, -1, self.temperature_column_outside_walls] + self.last_E[:, self.outside_walls].clone() # T = D+E
+               - 0.1) / 0.8 * self.temperature_range[self.outside_walls] + self.temperature_min[self.outside_walls]) # Unnormalization
+                - x[:, -1, [self.out_column]]) * self.initial_value_b # -T_out and scale by initial value of b
 
         # Loss to the neighboring zone is c*(T_k-T^neigh_k)
-        for i, (rooma, roomb) in enumerate(self.topology['Neighbors']):
-            for room1, room2 in zip([rooma, roomb], [roomb, rooma]):
-                E[:, room1] = E[:, room1].clone() - self.c[i](
-                    (((x[:, -1, self.temperature_column[room1]]
-                    + self.last_E[:, room1].clone() - 0.1) / 0.8
-                    * self.room_diff[room1] + self.room_min[room1])
-                    - ((x[:, -1, self.temperature_column[room2]]
-                        + self.last_E[:, room2].clone() - 0.1) / 0.8
-                        * self.room_diff[room2] + self.room_min[room2])).
-                        reshape(-1, 1)).squeeze() * self.initial_value_c
+        # This is parallelized to ocmpute all the effects at once
+        effect = self.c(((x[:, -1, self.neighboring_rooms_1] + self.last_E[:, self.neighboring_rooms_1].clone() # T = D+E in room 1
+                            - 0.1) / 0.8 * self.temperature_range[self.neighboring_rooms_1] + self.temperature_min[self.neighboring_rooms_1]) # Unnormalization
+                            - ((x[:, -1, self.neighboring_rooms_2] + self.last_E[:, self.neighboring_rooms_2].clone() # T = D+E in room 2
+                            - 0.1) / 0.8 * self.temperature_range[self.neighboring_rooms_2] + self.temperature_min[self.neighboring_rooms_2])) # Unnormalization
+
+        for i, (room1, room2) in enumerate(zip(self.neighboring_rooms_1, self.neighboring_rooms_2)):
+            E[:, room1] = E[:, room1].clone() - effect[:, i] * self.initial_value_c_1[i] # Scale by initial value of c
+            # Reverse effect on the other room  - if room1 gains energy from room2, room2 loses energy to room1 and vice versa
+            E[:, room2] = E[:, room2].clone() + effect[:, i] * self.initial_value_c_2[i] 
 
         ## Heating/cooling effect of HVAC on 'E'
-        
         # Find sequences in the batch where there actually is heating/cooling
-        # Trick needed to put padded values back to zero power before detecting power intputs
-        temp = torch.where(x[:, :, self.power_column] > 0.05, x[:, :, self.power_column], self.zero_power)
-        mask = torch.where(torch.abs(temp - self.zero_power) > 1e-6, True, False).squeeze(1).sum(axis=-1) > 0
-        
-        if sum(mask) > 0:
+        power = x[:, -1, self.power_column].clone()
+        heating = torch.any(power > self.eps, axis=1)
+        cooling = torch.any(power < -self.eps, axis=1)
 
-            # Find heating and cooling sequences
-            heating = x[:, 0, self.case_column] > 0.5
-            cooling = x[:, 0, self.case_column] < 0.5
-
-            # Substract the 'zero power' to get negative values for cooling power
-            power = x[:, -1, self.power_column].clone() - self.zero_power
-
-            if sum(heating) > 0:
-                # Heating effect: add a*u to 'E'
-                E[mask & heating, :] = E[mask & heating, :].clone() + self.a(
-                    power[mask & heating, :]) * self.initial_value_a
-
-            if sum(cooling) > 0:
-                # Cooling effect: add d*u (where u<0 now, so we actually subtract energy) to 'E'
-                E[mask & cooling, :] = E[mask & cooling, :].clone() + self.d(
-                    power[mask & cooling, :]) * self.initial_value_d
+        if sum(heating) > 0:
+            E[heating, :] = E[heating, :].clone() + self.a(power[heating, :]) * self.initial_value_a
+        if sum(cooling) > 0:
+            E[cooling, :] = E[cooling, :].clone() + self.d(power[cooling, :]) * self.initial_value_d
 
         # Recall 'D' and 'E' for the next time step
         self.last_D = D.clone()
@@ -534,16 +539,15 @@ class S_PCNN(nn.Module):
         # Final computation of the result 'T=D+E'
         output = D + E
         # Trick needed since some sequences are padded
-        output[torch.where(x[:, -1, self.case_column] < 1e-6)[0], :] = 0.
+        output[torch.where(x[:, -1, self.case_column] < self.eps)[0], :] = 0.
 
         # Return the predictions and states of the model
         return output, (h, c)
 
     @property
     def E_parameters(self):
-        return [[float(y._parameters['log_weight']) for y in x] for x in [self.a, self.b, self.c, self.d]]
-
-
+        return [list(np.exp(x._parameters['log_weight'].cpu().detach().numpy())) for x in [self.a, self.b, self.c, self.d]]
+    
 
 class M_PCNN(nn.Module):
     """
