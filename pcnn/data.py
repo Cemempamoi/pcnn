@@ -16,9 +16,18 @@ class DataSet:
         # Need to retain the names of the columns for later use
         self.temperature_column_name = data_kwargs['temperature_column']
 
+        # Check which inputs are needed in D
+        if isinstance(data_kwargs['inputs_D'], list):
+            inputs_D = []
+            for input_D in data_kwargs['inputs_D']:
+                inputs_D += input_D
+            inputs_D = list(set(inputs_D))
+        else:
+            inputs_D = data_kwargs['inputs_D']
+
         # Only keep useful columns
         self.X_columns = data_kwargs['temperature_column'] + data_kwargs['power_column'] + [data_kwargs['out_column']] \
-                        + data_kwargs['inputs_D'] + data_kwargs['case_column'] 
+                        + inputs_D + data_kwargs['case_column'] 
         if data_kwargs['neigh_column'] is not None:
             self.X_columns += data_kwargs['neigh_column']
         
@@ -78,7 +87,15 @@ class DataSet:
             data_kwargs['neigh_column'] = [i for i,x in enumerate(self.X_columns) if x in data_kwargs['neigh_column']]
         data_kwargs['temperature_column'] = [i for i,x in enumerate(self.X_columns) if x in data_kwargs['temperature_column']]
         data_kwargs['power_column'] = [i for i,x in enumerate(self.X_columns) if x in data_kwargs['power_column']]
-        data_kwargs['inputs_D'] = [i for i,x in enumerate(self.X_columns) if x in data_kwargs['inputs_D']]
+
+        # Check if inputs_D is a list of lists (in the case of M-PCNNs)
+        if isinstance(data_kwargs['inputs_D'][0], list):
+            inputs_D = []
+            for input_D in data_kwargs['inputs_D']:
+                inputs_D.append([i for i,x in enumerate(self.X_columns) if x in input_D])
+            data_kwargs['inputs_D'] = inputs_D
+        else:
+            data_kwargs['inputs_D'] = [i for i,x in enumerate(self.X_columns) if x in data_kwargs['inputs_D']]
         return data_kwargs
     
     def check_columns(self, data_kwargs: dict):
