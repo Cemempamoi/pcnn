@@ -180,7 +180,7 @@ class PCNN(nn.Module):
                     nn.init.xavier_normal_(param)
 
 
-    def forward(self, x_: torch.Tensor, states=None, warm_start: bool = False) -> dict:  # noqa: C901
+    def forward(self, x_: torch.Tensor, states=None, warm_start: bool = False) -> dict:
         """
         Custom redefinition of the forward path. The only sepcifc thing is the warm start, where we feed
         true temperatures back to the model.
@@ -431,7 +431,7 @@ class S_PCNN(nn.Module):
                     nn.init.xavier_normal_(param)
 
 
-    def forward(self, x_: torch.Tensor, states=None, warm_start: bool = False) -> dict:  # noqa: C901
+    def forward(self, x_: torch.Tensor, states=None, warm_start: bool = False) -> dict: 
         """
         Custom redefinition of the forward path. The only sepcifc thing is the warm start, where we feed
         true temperatures back to the model.
@@ -697,7 +697,7 @@ class M_PCNN(nn.Module):
                     nn.init.xavier_normal_(param)
 
 
-    def forward(self, x_: torch.Tensor, states=None, warm_start: bool = False) -> dict:  # noqa: C901
+    def forward(self, x_: torch.Tensor, states=None, warm_start: bool = False) -> dict:
         """
         Custom redefinition of the forward path. The only sepcifc thing is the warm start, where we feed
         true temperatures back to the model.
@@ -925,7 +925,7 @@ class LSTM(nn.Module):
                     nn.init.xavier_normal_(param)
 
 
-    def forward(self, x_: torch.Tensor, states=None, warm_start: bool = False) -> dict:  # noqa: C901
+    def forward(self, x_: torch.Tensor, states=None, warm_start: bool = False) -> dict:
         """
         Custom redefinition of the forward path. The only sepcifc thing is the warm start, where we feed
         true temperatures back to the model.

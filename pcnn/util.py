@@ -157,26 +157,6 @@ def format_elapsed_time(tic, toc):
     return f"{hours}:{minutes}:{seconds}"
 
 
-def load_data(save_name: str, save_path: str = DATA_SAVE_PATH) -> pd.DataFrame:
-    """
-    Function to load a dataframe if it exists
-
-    Args:
-        save_name:  Name of the file to load
-        save_path:  Where to load it
-    """
-
-    # Build the full path and check its existence
-    full_path = os.path.join(save_path, save_name + ".csv")
-    assert os.path.exists(full_path), f"The file {full_path} doesn't exist."
-
-    # Load the data and change the index to timestamps
-    data = pd.read_csv(full_path, index_col=[0])
-    data.index = pd.to_datetime(data.index)
-
-    return data
-
-
 def check_GPU_availability():
     if torch.cuda.is_available():
         device = torch.device("cuda:0")
@@ -192,11 +172,9 @@ def check_GPU_availability():
 
 @contextmanager
 def elapsed_timer():
-    start = default_timer()
-    elapser = lambda: default_timer() - start
-    yield lambda: elapser()
-    end = default_timer()
-    elapser = lambda: end-start
+    def elapser_function(start):
+        yield lambda: default_timer() - start
+    return elapser_function(start=default_timer())
 
 
 def ensure_list(value):

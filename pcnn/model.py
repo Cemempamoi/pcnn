@@ -14,7 +14,6 @@ from loguru import logger
 import torch
 from torch.nn.utils.rnn import pad_sequence
 from torch import optim
-import torch.nn.functional as F
 
 from pcnn.module import PCNN, S_PCNN, M_PCNN, LSTM
 from pcnn.data import prepare_data
@@ -442,7 +441,7 @@ class Model:
         """
 
         # Ensure the given sequences are a list of list, not only one list
-        if type(sequences) == tuple:
+        if isinstance(sequences, tuple):
             sequences = [sequences]
 
         # Iterate over the sequences to build the input in the right form
@@ -482,7 +481,7 @@ class Model:
         return_y = True
         if sequences is not None:
             # Ensure the given sequences are a list of list, not only one list
-            if type(sequences) == tuple:
+            if isinstance(sequences, tuple):
                 sequences = [sequences]
 
             # Build the input and output
@@ -543,7 +542,7 @@ class Model:
         # Reshape the data for consistency with the next part of the code if only one sequence is given
         if sequences is not None:
             # Reshape when only 1 sequence given
-            if type(sequences) == tuple:
+            if isinstance(sequences, tuple):
                 sequences = [sequences]
 
         elif data is not None:
@@ -644,7 +643,7 @@ class Model:
                             train_sizes.append(len(batch_sequences))
 
                 # Compute the average loss of the training epoch and print it
-                train_loss = sum([l*s for l,s in zip(train_losses, train_sizes)]) / sum(train_sizes)
+                train_loss = sum([loss*size for loss,size in zip(train_losses, train_sizes)]) / sum(train_sizes)
                 if (self.verbose > 0) and (epoch % print_each == 0):
                     print(f'{train_loss:.2E}', end='\t')
                 self.train_losses.append(train_loss)
@@ -666,7 +665,7 @@ class Model:
                         validation_sizes.append(len(batch_sequences))
 
                 # Compute the average validation loss of the epoch and print it
-                validation_loss = sum([l*s for l,s in zip(validation_losses, train_sizes)]) / sum(validation_sizes)
+                validation_loss = sum([loss*size for loss,size in zip(validation_losses, train_sizes)]) / sum(validation_sizes)
                 self.validation_losses.append(validation_loss)
                 if (self.verbose > 0) and (epoch % print_each == 0):
                     print(f'{validation_loss:.2E}', end='\t')
@@ -687,7 +686,7 @@ class Model:
                         test_sizes.append(len(batch_sequences))
                 
                 # Compute the average test loss of the epoch and print it
-                test_loss = sum([l*s for l,s in zip(test_losses, test_sizes)]) / sum(test_sizes)
+                test_loss = sum([loss*size for loss,size in zip(test_losses, test_sizes)]) / sum(test_sizes)
                 self.test_losses.append(test_loss)
                 if (self.verbose > 0) and (epoch % print_each == 0):
                     print(f'{test_loss:.2E}', end='\t')

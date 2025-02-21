@@ -66,11 +66,11 @@ def parameters(name: str = "Default_model", save_path: str = MODEL_SAVE_PATH,
 
     if feed_input_through_nn:
         assert len(input_nn_hidden_sizes) > 0, "You need to provide some hidden sizes for the input NN."
-        if type(input_nn_hidden_sizes) == int:
+        if isinstance(input_nn_hidden_sizes, int):
             input_nn_hidden_sizes = list(input_nn_hidden_sizes)
 
     assert len(output_nn_hidden_sizes) > 0, "You need to provide some hidden sizes for the output NN."
-    if type(output_nn_hidden_sizes) == int:
+    if isinstance(output_nn_hidden_sizes, int):
         output_nn_hidden_sizes = list(output_nn_hidden_sizes)
 
     if not isinstance(division_factor, list):

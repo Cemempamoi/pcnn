@@ -182,7 +182,7 @@ class DataSet:
 
         # Otherwise, copy the data to avoid issues
         else:
-            if type(data) == pd.Series:
+            if isinstance(data, pd.Series):
                 data_ = pd.DataFrame(data=data, index=data.index, columns=[data.name])
             else:
                 data_ = data.copy()
