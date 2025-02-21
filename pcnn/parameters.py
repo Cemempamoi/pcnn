@@ -6,6 +6,8 @@ in the individual parameters below
 """
 
 import os
+import torch.nn.functional as F
+
 
 DATA_SAVE_PATH = os.path.join("saves", "data")
 MODEL_SAVE_PATH = os.path.join("saves", "models")
@@ -15,20 +17,17 @@ for path in [DATA_SAVE_PATH, MODEL_SAVE_PATH]:
     if not os.path.isdir(path):
         os.mkdir(path)
 
-def parameters(unit: str = 'UMAR', to_normalize: bool = True,
-                to_standardize: bool = False,
-                name: str = "Default_model", save_path: str = MODEL_SAVE_PATH,
+def parameters(name: str = "Default_model", save_path: str = MODEL_SAVE_PATH,
                 seed: int = 0, batch_size: int = 128, shuffle: bool = True, n_epochs: int = 20,
                 learning_rate: float = 0.05, decrease_learning_rate:bool = True,
-                heating: bool = True, cooling: bool = True,
+                heating: bool = True, cooling: bool = True, loss = F.mse_loss,
                 warm_start_length: int = 12, minimum_sequence_length: int = 5, maximum_sequence_length: int = 240,
                 overlapping_distance: int = 4, validation_percentage: float = 0.2, test_percentage: float = 0.1,
                 learn_initial_hidden_states: bool = True, feed_input_through_nn: bool = True,
                 input_nn_hidden_sizes: list = [128], lstm_hidden_size: int = 256,
-                layer_norm: bool = True,
-                lstm_num_layers: int = 1,
+                layer_norm: bool = True, lstm_num_layers: int = 1,
                 output_nn_hidden_sizes: list = [128, 128], division_factor: float = 10.,
-                verbose: int = 2):
+                device: str = None, verbose: int = 2, eps: float = 1e-6):
     """
     Parameters of the models
 
@@ -60,10 +59,8 @@ def parameters(unit: str = 'UMAR', to_normalize: bool = True,
         output_nn_hidden_sizes:     Hidden sizes of the NNs processing the output
         division_factor:            Factor to scale the output of the networks to ease learning
         verbose:                    Verbose of the models
+        eps:                        Small value used for precision
     """
-
-    assert not (to_normalize and to_standardize), "Cannot normalize and standradize the data at the same time! " \
-                                                "Please put either 'to_normalize' or 'to_standardize' to False."
 
     assert cooling | heating, "At least heating or cooling needs to be true, otherwise nothing can be done"
 
@@ -82,11 +79,9 @@ def parameters(unit: str = 'UMAR', to_normalize: bool = True,
     return dict(name=name,
                 save_path=save_path,
                 seed=seed,
-                unit=unit,
-                to_normalize=to_normalize,
-                to_standardize=to_standardize,
                 heating=heating,
                 cooling=cooling,
+                loss=loss,
                 learn_initial_hidden_states=learn_initial_hidden_states,
                 warm_start_length=warm_start_length,
                 minimum_sequence_length=minimum_sequence_length,
@@ -106,5 +101,7 @@ def parameters(unit: str = 'UMAR', to_normalize: bool = True,
                 layer_norm=layer_norm,
                 output_nn_hidden_sizes=output_nn_hidden_sizes,
                 division_factor=division_factor,
-                verbose=verbose)
+                device=device,
+                verbose=verbose,
+                eps=eps)
 

@@ -18,7 +18,8 @@ import torch.nn.functional as F
 
 from pcnn.module import PCNN, S_PCNN, M_PCNN, LSTM
 from pcnn.data import prepare_data
-from pcnn.util import model_save_name_factory, format_elapsed_time, inverse_normalize, inverse_standardize, check_GPU_availability, elapsed_timer
+from pcnn.util import model_save_name_factory, format_elapsed_time, inverse_normalize, check_GPU_availability, \
+    elapsed_timer, ensure_list, check_initialization_physical_parameters
 
 
 class Model:
@@ -26,54 +27,70 @@ class Model:
     Class of models using PyTorch
     """
 
-    def __init__(self, data: pd.DataFrame, interval: int, model_kwargs: dict, inputs_D: list, 
-                module, rooms, case_column, out_column, neigh_column, temperature_column, power_column,
-                Y_columns: list, X_columns: list = None, topology: dict = None, load_last: bool = False,
-                load: bool = True, device: str = None):
+    def __init__(self, data: pd.DataFrame, module: str, model_params: dict, data_params: dict, 
+                 load: bool = True, load_last: bool = False):
         """
         Initialize a model.
 
         Args:
+            data:           DataFrame to use
+            module:         Module to use
             model_kwargs:   Parameters of the models, see 'parameters.py'
-            Y_columns:      Name of the columns that are to be predicted
-            X_columns:      Sensors (columns) of the input data
+            data_kwargs:    Parameters of the data
+            load:           Whether to load a model or not
+            load_last:      Whether to load the last model or not
         """
 
+        data_kwargs = data_params.copy()
+        model_kwargs = model_params.copy()
 
         assert module in ['PCNN', 'S_PCNN', 'M_PCNN', 'LSTM'],\
             f"The provided model type {module} does not exist, please chose among `'PCNN', 'S_PCNN', 'M_PCNN', 'LSTM'`."
 
         # Define the main attributes
-        self.name = model_kwargs["name"]
-        self.model_kwargs = model_kwargs
-        self.rooms = rooms if isinstance(rooms, list) else [rooms]
+        self.module = module
+        self.number_rooms = len(ensure_list(data_kwargs['temperature_column']))
+        model_kwargs['number_rooms'] = self.number_rooms
+        self.verbose = model_kwargs["verbose"]
+
+        # Prepare the data
+        self.dataset = prepare_data(data=data, data_kwargs=data_kwargs, verbose=self.verbose)
+        # Recover the updated data kwargs
+        data_kwargs = self.dataset.data_kwargs
+
+        # Compute the temperature range 
+        model_kwargs['temperature_min'], model_kwargs['temperature_range'] = self.dataset.get_temperarature_min_and_range()
+
+        # Special LSTM case
+        if module != 'LSTM':
+            for key in model_kwargs['initial_values_physical_parameters']:
+                model_kwargs['initial_values_physical_parameters'][key] = ensure_list(model_kwargs['initial_values_physical_parameters'][key])
+            # Snaity check
+            check_initialization_physical_parameters(initial_values_physical_parameters=model_kwargs['initial_values_physical_parameters'],
+                                                    data_params=data_kwargs)
+        else:
+            model_kwargs['number_inputs'] = len(self.dataset.X_columns)
 
         # Create the name associated to the model
+        self.name = model_kwargs["name"]
         self.save_name = model_save_name_factory(module=module, model_kwargs=model_kwargs)
-
         if not os.path.isdir(self.save_name):
             os.mkdir(self.save_name)
 
         # Fix the seeds for reproduction
         self._fix_seeds(seed=model_kwargs["seed"])
 
-        self.case_column = case_column if isinstance(case_column, list) else [case_column]
-        self.out_column = out_column
-        if neigh_column is not None:
-            self.neigh_column = neigh_column if isinstance(neigh_column, list) else [neigh_column]
+        # To use the GPU when available
+        if model_kwargs['device'] is None:
+            self.device = check_GPU_availability()
+            model_kwargs['device'] = self.device
         else:
-            self.neigh_column = neigh_column
-        self.temperature_column = temperature_column if isinstance(temperature_column, list) else [temperature_column]
-        self.power_column = power_column if isinstance(power_column, list) else [power_column]
-        self.inputs_D = inputs_D
-        self.topology = topology
-        self.module = module
+            self.device = model_kwargs['device']
 
-        self.unit = model_kwargs['unit']
+        # Store needed parameters
         self.batch_size = model_kwargs["batch_size"]
         self.shuffle = model_kwargs["shuffle"]
         self.n_epochs = model_kwargs["n_epochs"]
-        self.verbose = model_kwargs["verbose"]
         self.learning_rate = model_kwargs["learning_rate"]
         self.decrease_learning_rate = model_kwargs["decrease_learning_rate"]
         self.heating = model_kwargs["heating"]
@@ -84,149 +101,43 @@ class Model:
         self.overlapping_distance = model_kwargs["overlapping_distance"]
         self.validation_percentage = model_kwargs["validation_percentage"]
         self.test_percentage = model_kwargs["test_percentage"]
-        self.feed_input_through_nn = model_kwargs["feed_input_through_nn"]
-        self.input_nn_hidden_sizes = model_kwargs["input_nn_hidden_sizes"]
-        self.lstm_hidden_size = model_kwargs["lstm_hidden_size"]
-        self.lstm_num_layers = model_kwargs["lstm_num_layers"]
-        self.layer_norm = model_kwargs["layer_norm"]
-        self.output_nn_hidden_sizes = model_kwargs["output_nn_hidden_sizes"]
-        self.learn_initial_hidden_states = model_kwargs["learn_initial_hidden_states"]
-        self.division_factor = model_kwargs['division_factor']
-        self.model_kwargs = model_kwargs
-   
-        # Prepare the data
-        self.dataset = prepare_data(data=data, interval=interval, model_kwargs=model_kwargs, 
-                                    Y_columns=Y_columns, X_columns=X_columns, verbose=self.verbose)
 
-        self.model = None
-        self.optimizer = None
-        self.loss = None
+        self.case_column = data_kwargs['case_column']
+        data_kwargs['outside_walls'] =  ensure_list(data_kwargs['outside_walls'])
+        data_kwargs['neighboring_rooms'] = ensure_list(data_kwargs['neighboring_rooms'])
+
+        # Prepare the torch module
+        # Group parameters for simplicity
+        kwargs = model_kwargs | data_kwargs
+        if self.module == "PCNN":
+            self.model = PCNN(kwargs=kwargs)
+        elif self.module == "S_PCNN":
+            self.model = S_PCNN(kwargs=kwargs)
+        elif self.module == "M_PCNN":
+            self.model = M_PCNN(kwargs=kwargs)
+        elif self.module == "LSTM":
+            self.model = LSTM(kwargs=kwargs)
+
+        # define the optimizer and the loss
+        self.optimizer = optim.Adam(self.model.parameters(), lr=model_kwargs["learning_rate"])
+        self.loss = model_kwargs['loss']
+
+        # Save the updated parameters
+        self.model_kwargs = model_kwargs
+        self.data_kwargs = data_kwargs
+
+        # Prepare the lists to store progress
         self.train_losses = []
         self.validation_losses = []
-        self._validation_losses = []
         self.test_losses = []
         self.a = []
         self.b = []
         self.c = []
         self.d = []
         self.times = []
-        self.heating_sequences, self.cooling_sequences = None, None
-        self.train_sequences = None
-        self.validation_sequences = None
-        self.test_sequences = None
-
-        # Sanity check
-        if self.neigh_column is None:
-            logger.info(f'Sanity check of the columns:\n{[(w, [self.dataset.X_columns[i] for i in x]) 
-                                                          for w, x in zip(['Case', 'Room temp', 'Room power', 'Out temp'],
-                                    [self.case_column, self.temperature_column, self.power_column, [self.out_column]])]}')
-        else:
-            logger.info(f'Sanity check of the columns:\n{[(w, [self.dataset.X_columns[i] for i in x]) 
-                                                          for w, x in zip(['Case', 'Room temp', 'Room power', 'Out temp', 'Neigh temp'],
-                                    [self.case_column, self.temperature_column, self.power_column, [self.out_column], self.neigh_column])]}')
-
-        logger.info(f"Inputs used in D:\n{np.array(self.dataset.X_columns)[inputs_D]}\n")
-
-        # To use the GPU when available
-        if device is None:
-            self.device = check_GPU_availability()
-        else:
-            self.device = device
-
-        # Compute the scaled zero power points and the division factors to use in ResNet-like
-        # modules
-        self.zero_power = self.compute_zero_power()
-        self.normalization_variables = self.get_normalization_variables()
-        self.parameter_scalings = self.create_scalings()
-
-        # Prepare the torch module
-        if self.module == "PCNN":
-            self.model = PCNN(
-                device=self.device,
-                inputs_D=self.inputs_D,
-                learn_initial_hidden_states=self.learn_initial_hidden_states,
-                feed_input_through_nn=self.feed_input_through_nn,
-                input_nn_hidden_sizes=self.input_nn_hidden_sizes,
-                lstm_hidden_size=self.lstm_hidden_size,
-                lstm_num_layers=self.lstm_num_layers,
-                layer_norm=self.layer_norm,
-                output_nn_hidden_sizes=self.output_nn_hidden_sizes,
-                case_column=self.case_column,
-                temperature_column=self.temperature_column,
-                power_column=self.power_column,
-                out_column=self.out_column,
-                neigh_column=self.neigh_column,
-                zero_power=self.zero_power,
-                division_factor=self.division_factor,
-                normalization_variables=self.normalization_variables,
-                parameter_scalings=self.parameter_scalings,
-            )
-        
-        elif self.module == "S_PCNN":
-            self.model = S_PCNN(
-                device=self.device,
-                inputs_D=self.inputs_D,
-                learn_initial_hidden_states=self.learn_initial_hidden_states,
-                feed_input_through_nn=self.feed_input_through_nn,
-                input_nn_hidden_sizes=self.input_nn_hidden_sizes,
-                lstm_hidden_size=self.lstm_hidden_size,
-                lstm_num_layers=self.lstm_num_layers,
-                layer_norm=self.layer_norm,
-                output_nn_hidden_sizes=self.output_nn_hidden_sizes,
-                case_column=self.case_column,
-                temperature_column=self.temperature_column,
-                power_column=self.power_column,
-                out_column=self.out_column,
-                zero_power=self.zero_power,
-                division_factor=self.division_factor,
-                normalization_variables=self.normalization_variables,
-                parameter_scalings=self.parameter_scalings,
-                topology=self.topology,
-            )
-
-        elif self.module == "M_PCNN":
-            self.model = M_PCNN(
-                device=self.device,
-                inputs_D=self.inputs_D,
-                learn_initial_hidden_states=self.learn_initial_hidden_states,
-                feed_input_through_nn=self.feed_input_through_nn,
-                input_nn_hidden_sizes=self.input_nn_hidden_sizes,
-                lstm_hidden_size=self.lstm_hidden_size,
-                lstm_num_layers=self.lstm_num_layers,
-                layer_norm=self.layer_norm,
-                output_nn_hidden_sizes=self.output_nn_hidden_sizes,
-                case_column=self.case_column,
-                temperature_column=self.temperature_column,
-                power_column=self.power_column,
-                out_column=self.out_column,
-                zero_power=self.zero_power,
-                division_factor=self.division_factor,
-                normalization_variables=self.normalization_variables,
-                parameter_scalings=self.parameter_scalings,
-                topology=self.topology,
-            )
-
-        elif self.module == "LSTM":
-            self.model = LSTM(
-                device=self.device,
-                rooms=self.rooms,
-                inputs_D=self.inputs_D,
-                learn_initial_hidden_states=self.learn_initial_hidden_states,
-                feed_input_through_nn=self.feed_input_through_nn,
-                input_nn_hidden_sizes=self.input_nn_hidden_sizes,
-                lstm_hidden_size=self.lstm_hidden_size,
-                lstm_num_layers=self.lstm_num_layers,
-                layer_norm=self.layer_norm,
-                output_nn_hidden_sizes=self.output_nn_hidden_sizes,
-                temperature_column=self.temperature_column,
-                power_column=self.power_column,
-                division_factor=self.division_factor
-            )
-
-        self.optimizer = optim.Adam(self.model.parameters(), lr=model_kwargs["learning_rate"])
-        self.loss = F.mse_loss
 
         # Load the model if it exists
+        self.train_sequences = None
         if load:
             self.load(load_last=load_last)
 
@@ -236,6 +147,7 @@ class Model:
             self.train_test_validation_separation(validation_percentage=self.validation_percentage,
                                                   test_percentage=self.test_percentage)
 
+        # Push everything to the right device
         self.model = self.model.to(self.device)
 
     @property
@@ -433,131 +345,43 @@ class Model:
         self.test_sequences = []
 
         if self.verbose > 0:
-            logger.info("Creating training, validation and testing data...")
+            logger.info("Creating training, validation and testing data...\n")
 
-        for sequences in [self.heating_sequences, self.cooling_sequences]:
+        for i, sequences in enumerate([self.heating_sequences, self.cooling_sequences]):
             if len(sequences) > 0:
-                # Given the total number of sequences, define aproximate separations between training
+                # Given the total number of sequences, define approximate separations between training
                 # validation and testing sets
                 train_validation_sep = int((1 - test_percentage - validation_percentage) * len(sequences))
                 validation_test_sep = int((1 - test_percentage) * len(sequences))
 
                 # Little trick to ensure training, validation and test sequences are completely distinct
                 while True:
-                    if (sequences[train_validation_sep - 1][1] < sequences[train_validation_sep][0]) | (train_validation_sep == 1):
+                    if (sequences[train_validation_sep - 1][1] < sequences[train_validation_sep][0]) | (train_validation_sep == 0):
                         break
                     train_validation_sep -= 1
-                if test_percentage > 0.:
-                    while True:
-                        if (sequences[validation_test_sep - 1][1] < sequences[validation_test_sep][0]) | (validation_test_sep == 1):
-                            break
-                        validation_test_sep -= 1
+
+                # Check if the training and validation sets are completely distinct
+                # If there is no missing data, the above code will fail to fully separate train and validation sequences
+                # In that casem fall back to the default threshold
+                if train_validation_sep == 0:
+                    logger.warning(f"Could not fully separate training and validation {'heating' if i==0 else 'cooling'} sequences, some data will overlap.")
+                    logger.info("This error arises if there is no missing data - to avoid it, remove a datapoint (set it to Nan) in the data where the seapration should be.\n")
+                    train_validation_sep = int((1 - test_percentage - validation_percentage) * len(sequences))
+
+                while True:
+                    if (sequences[validation_test_sep - 1][1] < sequences[validation_test_sep][0]) | (validation_test_sep == train_validation_sep):
+                        break
+                    validation_test_sep -= 1
+
+                if validation_test_sep == train_validation_sep:
+                    logger.warning(f"Could not fully separate validation and testing {'heating' if i==0 else 'cooling'} sequences, some data will overlap.")
+                    logger.info("This error arises if there is no missing data - to avoid it, remove a datapoint (set it to Nan) in the data where the seapration should be.\n")
+                    validation_test_sep = int((1 - test_percentage) * len(sequences))
 
                 # Prepare the lists
                 self.train_sequences += sequences[:train_validation_sep]
                 self.validation_sequences += sequences[train_validation_sep:validation_test_sep]
                 self.test_sequences += sequences[validation_test_sep:]
-
-    def compute_zero_power(self):
-        """
-        Small helper function to compute the scaled value of zero power
-        """
-
-        # Scale the zero
-        if self.dataset.is_normalized:
-            min_ = self.dataset.min_.iloc[self.power_column]
-            max_ = self.dataset.max_.iloc[self.power_column]
-            zero = 0.8 * (0.0 - min_) / (max_ - min_) + 0.1
-
-        elif self.dataset.is_standardized:
-            mean = self.dataset.mean.iloc[self.power_column]
-            std = self.dataset.std.iloc[self.power_column]
-            zero = (0.0 - mean) / std
-
-        else:
-            zero = np.array([0.0] * len(self.power_column))
-
-        return np.array(zero)
-
-    def create_scalings(self):
-        """
-        Function to initialize good parameters for a, b, c and d, the key parameters of the structure.
-        Intuition:
-          - The room loses 1.5 degrees in 6h when the outside temperature is 25 degrees lower than
-              the inside one (and some for losses to the neighboring room)
-          - The room gains 2 degrees in 4h of heating
-
-        Returns:
-            The scaling parameters according to the data
-        """
-
-        parameter_scalings = {}
-
-        if self.unit == 'DFAB':
-            # DFAB power is in kW
-            parameter_scalings['b'] = [1 / (2 / (self.dataset.max_ - self.dataset.min_).iloc[self.temperature_column]
-                                           * 0.8 / 25 / 6 / 60 * self.dataset.interval).mean()]
-            parameter_scalings['c'] = [1 / (2.5 / (self.dataset.max_ - self.dataset.min_).iloc[self.temperature_column]
-                                           * 0.8 / 25 / 6 / 60 * self.dataset.interval).mean() / 10]
-
-            parameter_scalings['a'] = [
-                1 / (1 / (self.dataset.max_ - self.dataset.min_).iloc[self.temperature_column[i]] * 0.8  # Gain 2 degrees
-                     / (self.dataset.max_['Thermal total power'] / (self.dataset.max_ - self.dataset.min_).iloc[
-                            'Thermal total power'] * 0.8)  # With average power of 1500 W
-                     / (10 * 60 / self.dataset.interval)) for i in range(len(self.rooms))]  # In 4h
-            parameter_scalings['d'] = [
-                1 / (1 / (self.dataset.max_ - self.dataset.min_).iloc[self.temperature_column[i]] * 0.8  # Gain 2 degrees
-                     / (- self.dataset.min_['Thermal total power'] / (self.dataset.max_ - self.dataset.min_).iloc[
-                            'Thermal total power'] * 0.8)  # With average power of 1000 W
-                     / (10 * 60 / self.dataset.interval)) for i in range(len(self.rooms))]  # In 4h
-
-        else:
-            parameter_scalings['b'] = [1 / (1.5 / (self.dataset.max_ - self.dataset.min_).iloc[self.temperature_column]
-                                           * 0.8 / 25 / 6 / 60 * self.dataset.interval).mean()]
-            parameter_scalings['c'] = [1 / (1.5 / (self.dataset.max_ - self.dataset.min_).iloc[self.temperature_column]
-                                           * 0.8 / 25 / 6 / 60 * self.dataset.interval).mean() / 10]
-
-            # needed condition to make sure to deal with data in Watts and kWs
-            if (self.dataset.max_ - self.dataset.min_).iloc[self.power_column[0]] > 100:
-                parameter_scalings['a'] = [
-                    1 / (2 / (self.dataset.max_ - self.dataset.min_).iloc[self.temperature_column[i]] * 0.8  # Gain 2 degrees
-                         / (1000 / (self.dataset.max_ - self.dataset.min_).iloc[
-                                self.power_column[i]] * 0.8)  # With average power of 1.5 kW
-                         / (4 * 60 / self.dataset.interval)) for i in range(len(self.rooms))] # in 4h
-                parameter_scalings['d'] = [
-                    1 / (2 / (self.dataset.max_ - self.dataset.min_).iloc[self.temperature_column[i]] * 0.8  # Gain 2 degrees
-                         / (1000 / (self.dataset.max_ - self.dataset.min_).iloc[
-                                self.power_column[i]] * 0.8)  # With average power of 1.5 kW
-                         / (4 * 60 / self.dataset.interval)) for i in range(len(self.rooms))] # in 4h
-            else:
-                parameter_scalings['a'] = [
-                    1 / (2 / (self.dataset.max_ - self.dataset.min_).iloc[self.temperature_column[i]] * 0.8  # Gain 2 degrees
-                         / (self.dataset.max_.iloc[self.power_column[i]] * 3/2 / (self.dataset.max_ - self.dataset.min_).iloc[
-                                self.power_column[i]] * 0.8)  # With average power of 1.5 kW
-                         / (4 * 60 / self.dataset.interval)) for i in range(len(self.rooms))]  # in 4h
-                parameter_scalings['d'] = [
-                    1 / (2 / (self.dataset.max_ - self.dataset.min_).iloc[self.temperature_column[i]] * 0.8  # Gain 2 degrees
-                         / (self.dataset.max_.iloc[self.power_column[i]] * 3/2 / (self.dataset.max_ - self.dataset.min_).iloc[
-                                self.power_column[i]] * 0.8)  # With average power of 1.5 kW
-                         / (4 * 60 / self.dataset.interval)) for i in range(len(self.rooms))]  # in 4h
-
-        return parameter_scalings
-
-    def get_normalization_variables(self):
-        """
-        Function to get the minimum and the amplitude of some variables in the data. In particular, we need
-        that for the room temperature, the outside temperature and the neighboring room temperature.
-        This is used by the physics-inspired network to unnormalize the predictions.
-        """
-        normalization_variables = {}
-        normalization_variables['Room'] = [torch.Tensor(self.dataset.min_.iloc[self.temperature_column].values).to(self.device),
-                                           torch.Tensor((self.dataset.max_ - self.dataset.min_).iloc[self.temperature_column].values).to(self.device)]
-        if self.neigh_column is not None:
-            normalization_variables['Neigh'] = [torch.Tensor(self.dataset.min_.iloc[self.neigh_column].values).to(self.device),
-                                           torch.Tensor((self.dataset.max_ - self.dataset.min_).iloc[self.neigh_column].values).to(self.device)]
-        normalization_variables['Out'] = [torch.Tensor([self.dataset.min_.iloc[self.out_column]]).to(self.device),
-                                          torch.Tensor([(self.dataset.max_ - self.dataset.min_).iloc[self.out_column]]).to(self.device)]
-        return normalization_variables
 
     def batch_iterator(self, iterator_type: str = "train", batch_size: int = None, shuffle: bool = True) -> None:
         """
@@ -668,10 +492,10 @@ class Model:
             if isinstance(data, tuple):
                 if len(data[0].shape) == 3:
                     batch_x = data[0].reshape(data[0].shape[0], data[0].shape[1], -1)
-                    batch_y = data[1].reshape(data[0].shape[0], data[0].shape[1], len(self.rooms))
+                    batch_y = data[1].reshape(data[0].shape[0], data[0].shape[1], self.number_rooms)
                 else:
                     batch_x = data[0].reshape(1, data[0].shape[0], -1)
-                    batch_y = data[1].reshape(1, data[0].shape[0], len(self.rooms))
+                    batch_y = data[1].reshape(1, data[0].shape[0], self.number_rooms)
             else:
                 if len(data.shape) == 3:
                     batch_x = data.reshape(data.shape[0], data.shape[1], -1)
@@ -682,7 +506,7 @@ class Model:
         else:
             raise ValueError("Either sequences or data must be provided to the `predict` function")
 
-        predictions = torch.zeros((batch_x.shape[0], batch_x.shape[1], len(self.rooms))).to(self.device)
+        predictions = torch.zeros((batch_x.shape[0], batch_x.shape[1], self.number_rooms)).to(self.device)
         states = None
 
         # Iterate through the sequences of data to predict each step, replacing the true power and temperature
@@ -733,7 +557,6 @@ class Model:
             true_data = true_data.reshape(1, true_data.shape[0], -1)
 
         # Scale the data back
-        cols = self.dataset.Y_columns[:-1] if self.predict_power else self.dataset.Y_columns[:-2]
         truth = true_data.reshape(true_data.shape[0], true_data.shape[1], -1)
         true = np.zeros_like(predictions)
 
@@ -745,14 +568,6 @@ class Model:
                 true[i, :, :] = inverse_normalize(data=truth[i, :, :],
                                                        min_=self.dataset.min_[self.dataset.Y_columns],
                                                        max_=self.dataset.max_[self.dataset.Y_columns])
-        elif self.dataset.is_standardized:
-            for i, sequence in enumerate(sequences):
-                predictions[i, :, :] = inverse_standardize(data=predictions[i, :, :],
-                                                           mean=self.dataset.mean[self.dataset.Y_columns],
-                                                           std=self.dataset.std[self.dataset.Y_columns])
-                true[i, :, :] = inverse_standardize(data=truth[i, :, :],
-                                                         mean=self.dataset.mean[self.dataset.Y_columns],
-                                                         std=self.dataset.std[self.dataset.Y_columns])
 
         return predictions, true
 
@@ -963,20 +778,14 @@ class Model:
                 "test_sequences": self.test_sequences,
                 "train_losses": self.train_losses,
                 "validation_losses": self.validation_losses,
-                "_validation_losses": self._validation_losses,
                 "test_losses": self.test_losses,
                 "times": self.times,
                 "a": self.a,
                 "b": self.b,
                 "c": self.c,
                 "d": self.d,
-                "warm_start_length": self.warm_start_length,
-                "maximum_sequence_length": self.maximum_sequence_length,
-                "feed_input_through_nn": self.feed_input_through_nn,
-                "input_nn_hidden_sizes": self.input_nn_hidden_sizes,
-                "lstm_hidden_size": self.lstm_hidden_size,
-                "lstm_num_layers": self.lstm_num_layers,
-                "output_nn_hidden_sizes": self.output_nn_hidden_sizes,
+                "model_kwargs": self.model_kwargs,
+                "data_kwargs": self.data_kwargs
             },
             save_name,
         )
@@ -1017,7 +826,7 @@ class Model:
                         if isinstance(v, torch.Tensor):
                             state[k] = v.cuda()
             self.train_sequences = checkpoint["train_sequences"]
-            self.validation_sequences = checkpoint["validation_sequences"]
+            self.validation_sequences = checkpoint["validation_sequences"]            
             self.test_sequences = checkpoint["test_sequences"]
             self.train_losses = checkpoint["train_losses"]
             self.validation_losses = checkpoint["validation_losses"]
@@ -1027,13 +836,25 @@ class Model:
             self.b = checkpoint["b"]
             self.c = checkpoint["c"]
             self.d = checkpoint["d"]
-            self.warm_start_length = checkpoint["warm_start_length"]
-            self.maximum_sequence_length = checkpoint["maximum_sequence_length"]
-            self.feed_input_through_nn = checkpoint["feed_input_through_nn"]
-            self.input_nn_hidden_sizes = checkpoint["input_nn_hidden_sizes"]
-            self.lstm_hidden_size = checkpoint["lstm_hidden_size"]
-            self.lstm_num_layers = checkpoint["lstm_num_layers"]
-            self.output_nn_hidden_sizes = checkpoint["output_nn_hidden_sizes"]
+            for key in self.model_kwargs:
+                if key in checkpoint['model_kwargs']:
+                    if isinstance(self.model_kwargs[key], dict):
+                        for x,y in zip(self.model_kwargs[key].keys(), checkpoint['model_kwargs'][key].keys()):
+                            if isinstance(self.model_kwargs[key][x], list):
+                                for a,b in zip(self.model_kwargs[key][x], checkpoint['model_kwargs'][key][y]):
+                                    if a != b:
+                                        logger.warning(f"The parameter {key} was found in the checkpoint as {checkpoint['model_kwargs'][key]} "
+                                            f"while you passed {self.model_kwargs[key]}. The checkpoint value is used for compliance with the model found.")
+                    elif np.any(self.model_kwargs[key] != checkpoint['model_kwargs'][key]):
+                        logger.warning(f"The parameter {key} was found in the checkpoint as {checkpoint['model_kwargs'][key]} "
+                                       f"while you passed {self.model_kwargs[key]}. The checkpoint value is used for compliance with the model found.")
+            for key in self.data_kwargs:
+                if key in checkpoint['data_kwargs']:
+                    if np.any(self.data_kwargs[key] != checkpoint['data_kwargs'][key]):  
+                        logger.warning(f"The parameter {key} was found in the checkpoint as {checkpoint['data_kwargs'][key]} "
+                                       f"while you passed {self.data_kwargs[key]}. The checkpoint value is used for compliance with the model found.")
+            self.model_kwargs = checkpoint["model_kwargs"]
+            self.data_kwargs = checkpoint["data_kwargs"]
 
             # Print the current status of the found model
             if self.verbose > 0:
