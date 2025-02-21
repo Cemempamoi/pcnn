@@ -270,9 +270,9 @@ class PCNN(nn.Module):
         cooling = torch.any(power < -self.eps, axis=1)
 
         if sum(heating) > 0:
-            E[heating] = E[heating].clone() + self.a(power[heating]) * self.initial_value_a
+            E[heating] = E[heating].clone() + (self.a(power[heating, :]) * self.initial_value_a).sum(axis=1, keepdims=True)
         if sum(cooling) > 0:
-            E[cooling] = E[cooling].clone() + self.d(power[cooling]) * self.initial_value_d
+            E[cooling] = E[cooling].clone() + (self.d(power[cooling, :]) * self.initial_value_d).sum(axis=1, keepdims=True)
 
         # Recall 'D' and 'E' for the next time step
         self.last_D = D.clone()
