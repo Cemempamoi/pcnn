@@ -58,11 +58,18 @@ class Model:
         # Recover the updated data kwargs
         data_kwargs = self.dataset.data_kwargs
 
-        # Compute the scaled zero power points and the division factors 
+        # Compute the temperature range 
         model_kwargs['temperature_min'], model_kwargs['temperature_range'] = self.dataset.get_temperarature_min_and_range()
 
-        for key in model_kwargs['initial_values_physical_parameters']:
-            model_kwargs['initial_values_physical_parameters'][key] = ensure_list(model_kwargs['initial_values_physical_parameters'][key])
+        # Special LSTM case
+        if module != 'LSTM':
+            for key in model_kwargs['initial_values_physical_parameters']:
+                model_kwargs['initial_values_physical_parameters'][key] = ensure_list(model_kwargs['initial_values_physical_parameters'][key])
+            # Snaity check
+            check_initialization_physical_parameters(initial_values_physical_parameters=model_kwargs['initial_values_physical_parameters'],
+                                                    data_params=data_kwargs)
+        else:
+            model_kwargs['number_inputs'] = len(self.dataset.X_columns)
 
         # Create the name associated to the model
         self.name = model_kwargs["name"]
@@ -98,10 +105,6 @@ class Model:
         self.case_column = data_kwargs['case_column']
         data_kwargs['outside_walls'] =  ensure_list(data_kwargs['outside_walls'])
         data_kwargs['neighboring_rooms'] = ensure_list(data_kwargs['neighboring_rooms'])
-
-        # Snaity check
-        check_initialization_physical_parameters(initial_values_physical_parameters=model_kwargs['initial_values_physical_parameters'],
-                                                data_params=data_kwargs)
 
         # Prepare the torch module
         # Group parameters for simplicity

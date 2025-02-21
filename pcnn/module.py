@@ -856,7 +856,6 @@ class LSTM(nn.Module):
             layer_norm:                 Flag whether to include a layer normalization layer after the LSTM
             output_nn_hidden_sizes:     Hidden sizes of the NNs
             temperature_column:         Index of the column corresponding to the room temperature
-            power_column:               Index of the column corresponding to the power consumption
             division_factor:            Factors to scale the base predictions and ensure not too big differences
                                           between timesteps
         """
@@ -867,7 +866,7 @@ class LSTM(nn.Module):
         # Recall the parameters for further use
         self.device = kwargs['device']
         self.number_rooms = kwargs['number_rooms']
-        self.inputs_D = kwargs['inputs_D']
+        self.number_inputs = kwargs['number_inputs']
         self.learn_initial_hidden_states = kwargs['learn_initial_hidden_states']
         self.feed_input_through_nn = kwargs['feed_input_through_nn']
         self.input_nn_hidden_sizes = kwargs['input_nn_hidden_sizes']
@@ -876,7 +875,7 @@ class LSTM(nn.Module):
         self.layer_norm = kwargs['layer_norm']
         self.output_nn_hidden_sizes = kwargs['output_nn_hidden_sizes']
         self.temperature_column = kwargs['temperature_column']
-        self.power_columns = kwargs['power_column']
+        self.case_column = kwargs['case_column']
         self.division_factor = torch.Tensor(kwargs['division_factor']).to(self.device)
 
         # Define latent variables
@@ -901,12 +900,12 @@ class LSTM(nn.Module):
 
         # Process the input by a NN if wanted
         if self.feed_input_through_nn:
-            size = [len(self.inputs_D)] + self.input_nn_hidden_sizes
+            size = [self.number_inputs] + self.input_nn_hidden_sizes
             self.input_nn = nn.ModuleList([nn.Sequential(nn.Linear(size[i], size[i + 1]), nn.ReLU())
                                                 for i in range(0, len(size) - 1)])
 
         # Create the LSTMs at the core of `D`, with normalization layers
-        lstm_input_size = self.input_nn_hidden_sizes[-1] if self.feed_input_through_nn else len(self.inputs_D)
+        lstm_input_size = self.input_nn_hidden_sizes[-1] if self.feed_input_through_nn else self.number_inputs
         self.lstm = nn.LSTM(input_size=lstm_input_size, hidden_size=self.lstm_hidden_size,
                                  num_layers=self.lstm_num_layers, batch_first=True)
         if self.layer_norm:
@@ -939,7 +938,6 @@ class LSTM(nn.Module):
             states:     Original hidden and cell states if known
                           (for all LSTMs, i.e. the base, the heating and the cooling)
             warm_start: Whether we are warm starting the model
-            mpc_mode:   Flag to pass to the MPC mode and return D and E separately
 
         Returns:
             The predicted temperature and power, and a tuple containing the hidden and cell states of
@@ -973,15 +971,10 @@ class LSTM(nn.Module):
 
         ## Forward 'D'
         # Input embedding when wanted
+        D_embedding = x
         if self.feed_input_through_nn:
-            D_embedding = torch.zeros(x.shape[0], x.shape[1], self.input_nn_hidden_sizes[-1]).to(self.device)
-            for time_step in range(x.shape[1]):
-                temp = x[:, time_step, self.inputs_D]
-                for layer in self.input_nn:
-                    temp = layer(temp)
-                D_embedding[:, time_step, :] = temp
-        else:
-            D_embedding = x[:, :, self.inputs_D]
+            for layer in self.input_nn:
+                D_embedding = layer(D_embedding)
 
         # LSTM prediction for the base temperature
         lstm_output, (h, c) = self.lstm(D_embedding, (h, c))
@@ -991,7 +984,7 @@ class LSTM(nn.Module):
 
         # Some manipulations are needed to feed the output through the neural network if wanted
         # Put the data is the form needed for the neural net
-        temp = lstm_output[:, -1, :]
+        temp = lstm_output
         # Go through the input layer of the NN
         for layer in self.output_nn:
             temp = layer(temp)
