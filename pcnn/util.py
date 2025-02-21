@@ -350,14 +350,23 @@ def check_initialization_physical_parameters(initial_values_physical_parameters,
     Function to check the initialization of the physical parameters
     """
     assert len(initial_values_physical_parameters['a']) == len(data_params['temperature_column']), \
-        f"The initial value of a is not the right size! You have {len(data_params['temperature_column'])} rooms but {len(initial_values_physical_parameters['a'])} initial values."
-    assert len(initial_values_physical_parameters['b']) == len(data_params['outside_walls']), \
-        f"The initial value of b is not the right size! You have {len(data_params['outside_walls'])} walls but {len(initial_values_physical_parameters['b'])} initial values."
+        f"The initial value of a is not the right size! You have {len(data_params['temperature_column'])} rooms but {len(initial_values_physical_parameters['a'])} initial values for 'a'."
+    
+    if data_params['outside_walls'] is not None:
+        assert len(initial_values_physical_parameters['b']) == len(data_params['outside_walls']), \
+            f"The initial value of b is not the right size! You have {len(data_params['outside_walls'])} external walls but {len(initial_values_physical_parameters['b'])} initial values for 'b'."
+    # Single-zone PCNNs have only one 'b' parameters
+    else:
+        assert len(initial_values_physical_parameters['b']) == 1, \
+            f"The initial value of b is not the right size! You have 1 external walls but {len(initial_values_physical_parameters['b'])} initial values for 'b'."
+    
     if data_params['neighboring_rooms'] is not None:
         assert len(initial_values_physical_parameters['c']) == len(data_params['neighboring_rooms']), \
-            f"The initial value of c is not the right size! You have {len(data_params['neighboring_rooms'])} pairs of rooms but {len(initial_values_physical_parameters['c'])} initial values."
+            f"The initial value of c is not the right size! You have {len(data_params['neighboring_rooms'])} pairs of rooms but {len(initial_values_physical_parameters['c'])} initial values for 'c'."
+    # Single-zone PCNNs don't use 'neighboring_rooms'
     elif data_params['neigh_column'] is not None:
         assert len(initial_values_physical_parameters['c']) == len(data_params['neigh_column']), \
-            f"The initial value of c is not the right size! You have {len(data_params['neigh_column'])} pairs of rooms but {len(initial_values_physical_parameters['c'])} initial values."
+            f"The initial value of c is not the right size! You have {len(data_params['neigh_column'])} pairs of rooms but {len(initial_values_physical_parameters['c'])} initial values for 'c'."
+    
     assert len(initial_values_physical_parameters['d']) == len(data_params['temperature_column']), \
-        f"The initial value of d is not the right size! You have {len(data_params['temperature_column'])} rooms but {len(initial_values_physical_parameters['d'])} initial values."
+        f"The initial value of d is not the right size! You have {len(data_params['temperature_column'])} rooms but {len(initial_values_physical_parameters['d'])} initial values for 'd'."
