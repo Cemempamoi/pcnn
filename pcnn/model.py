@@ -607,9 +607,6 @@ class Model:
 
             for epoch in range(trained_epochs, trained_epochs + n_epochs):
 
-                if (self.verbose > 0) and (epoch % print_each == 0):
-                    print(epoch, end='\t')
-
                 # Start the training, define a list to retain the training losses along the way
                 if epoch > 0:
                     self.model.train()
@@ -644,8 +641,6 @@ class Model:
 
                 # Compute the average loss of the training epoch and print it
                 train_loss = sum([loss*size for loss,size in zip(train_losses, train_sizes)]) / sum(train_sizes)
-                if (self.verbose > 0) and (epoch % print_each == 0):
-                    print(f'{train_loss:.2E}', end='\t')
                 self.train_losses.append(train_loss)
 
                 # Start the validation, again defining a list to recall the losses
@@ -666,9 +661,7 @@ class Model:
 
                 # Compute the average validation loss of the epoch and print it
                 validation_loss = sum([loss*size for loss,size in zip(validation_losses, train_sizes)]) / sum(validation_sizes)
-                self.validation_losses.append(validation_loss)
-                if (self.verbose > 0) and (epoch % print_each == 0):
-                    print(f'{validation_loss:.2E}', end='\t')
+                self.validation_losses.append(validation_loss)                    
 
                 # Start the test, again defining a list to recall the losses
                 test_losses = []
@@ -688,12 +681,13 @@ class Model:
                 # Compute the average test loss of the epoch and print it
                 test_loss = sum([loss*size for loss,size in zip(test_losses, test_sizes)]) / sum(test_sizes)
                 self.test_losses.append(test_loss)
-                if (self.verbose > 0) and (epoch % print_each == 0):
-                    print(f'{test_loss:.2E}', end='\t')
 
-               # Timing information
+                # Timing information
                 self.times.append(elapsed())
-                if (self.verbose > 0) and (epoch % print_each == 0):
+
+                # Prints
+                if ((self.verbose > 0) and (epoch % print_each == 0)) or (validation_loss < best_loss):
+                    print(f'{epoch}\t{train_loss:.2E}\t{validation_loss:.2E}\t{test_loss:.2E}', end='\t')
                     print(f'{format_elapsed_time(0, self.times[-1])}', end='\t' if (validation_loss < best_loss) and (epoch > 0) else '\n')
 
                 # Save parameters
@@ -761,7 +755,7 @@ class Model:
         """
 
         if verbose > 0:
-            print(f'\tNew {name_to_add}!')
+            print(f'New {name_to_add}!')
 
         if name_to_add is not None:
             save_name = os.path.join(self.save_name, f"{name_to_add}_model.pt")
