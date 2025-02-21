@@ -17,7 +17,7 @@ class DataSet:
         self.temperature_column_name = data_kwargs['temperature_column']
 
         # Check which inputs are needed in D
-        if isinstance(data_kwargs['inputs_D'], list):
+        if isinstance(data_kwargs['inputs_D'][0], list):
             inputs_D = []
             for input_D in data_kwargs['inputs_D']:
                 inputs_D += input_D
