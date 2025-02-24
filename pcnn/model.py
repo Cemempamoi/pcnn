@@ -570,7 +570,7 @@ class Model:
 
         return predictions, true
 
-    def fit(self, n_epochs: int = None, number_sequences: int = None, print_each=1) -> None:
+    def fit(self, n_epochs: int = None, number_sequences: int = None, print_each: int = 1, output_best: bool = True) -> None:
         """
         General function fitting a model for several epochs, training and evaluating it on the data.
 
@@ -712,6 +712,10 @@ class Model:
                 logger.info(f"Train loss:\t{self.train_losses[best_epoch]:.2E}")
                 logger.info(f"Val loss:\t{self.validation_losses[best_epoch]:.2E}")
                 logger.info(f"Test loss:\t{self.test_losses[best_epoch]:.2E}")
+
+            if output_best:
+                self.load(load_last=False)
+                logger.info('Loaded and returned the best obtained model!')
 
 
     def adjust_learning_rate(self, epoch: int) -> None:
