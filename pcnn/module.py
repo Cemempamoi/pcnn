@@ -270,9 +270,15 @@ class PCNN(nn.Module):
         cooling = torch.any(power < -self.eps, axis=1)
 
         if sum(heating) > 0:
-            E[heating] = E[heating].clone() + (self.a(power[heating, :]) * self.initial_value_a).sum(axis=1, keepdims=True)
+            # Correction needed if one source of power is heating and one is cooling 
+            # -> set cooling power to 0, otherwise it will subtract a*cooling_power from E
+            heating_power = torch.where(power[heating, :] > self.eps, power[heating, :], 0.)
+            E[heating] = E[heating].clone() + (self.a(heating_power) * self.initial_value_a).sum(axis=1, keepdims=True)
         if sum(cooling) > 0:
-            E[cooling] = E[cooling].clone() + (self.d(power[cooling, :]) * self.initial_value_d).sum(axis=1, keepdims=True)
+            # Correction needed if one source of power is heating and one is cooling
+            # -> set heating power to 0, otherwise it will add d*heating_power to E
+            cooling_power = torch.where(power[cooling, :] < -self.eps, power[cooling, :], 0.)
+            E[cooling] = E[cooling].clone() + (self.d(cooling_power) * self.initial_value_d).sum(axis=1, keepdims=True)
 
         # Recall 'D' and 'E' for the next time step
         self.last_D = D.clone()
@@ -528,9 +534,15 @@ class S_PCNN(nn.Module):
         cooling = torch.any(power < -self.eps, axis=1)
 
         if sum(heating) > 0:
-            E[heating, :] = E[heating, :].clone() + self.a(power[heating, :]) * self.initial_value_a
+            # Correction needed if one source of power is heating and one is cooling 
+            # -> set cooling power to 0, otherwise it will subtract a*cooling_power from E
+            heating_power = torch.where(power[heating, :] > self.eps, power[heating, :], 0.)
+            E[heating, :] = E[heating, :].clone() + self.a(heating_power) * self.initial_value_a
         if sum(cooling) > 0:
-            E[cooling, :] = E[cooling, :].clone() + self.d(power[cooling, :]) * self.initial_value_d
+            # Correction needed if one source of power is heating and one is cooling
+            # -> set heating power to 0, otherwise it will add d*heating_power to E
+            cooling_power = torch.where(power[cooling, :] < -self.eps, power[cooling, :], 0.)
+            E[cooling, :] = E[cooling, :].clone() + self.d(cooling_power) * self.initial_value_d
 
         # Recall 'D' and 'E' for the next time step
         self.last_D = D.clone()
@@ -812,9 +824,15 @@ class M_PCNN(nn.Module):
         cooling = torch.any(power < -self.eps, axis=1)
 
         if sum(heating) > 0:
-            E[heating, :] = E[heating, :].clone() + self.a(power[heating, :]) * self.initial_value_a
+            # Correction needed if one source of power is heating and one is cooling 
+            # -> set cooling power to 0, otherwise it will subtract a*cooling_power from E
+            heating_power = torch.where(power[heating, :] > self.eps, power[heating, :], 0.)
+            E[heating, :] = E[heating, :].clone() + self.a(heating_power) * self.initial_value_a
         if sum(cooling) > 0:
-            E[cooling, :] = E[cooling, :].clone() + self.d(power[cooling, :]) * self.initial_value_d
+            # Correction needed if one source of power is heating and one is cooling
+            # -> set heating power to 0, otherwise it will add d*heating_power to E
+            cooling_power = torch.where(power[cooling, :] < -self.eps, power[cooling, :], 0.)
+            E[cooling, :] = E[cooling, :].clone() + self.d(cooling_power) * self.initial_value_d
 
         # Recall 'D' and 'E' for the next time step
         self.last_D = D.clone()
