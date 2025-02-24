@@ -799,7 +799,7 @@ class Model:
              Nothing, everything is done in place and stored in the parameters.
         """
 
-        if verbose = None:
+        if verbose is None:
             verbose = self.verbose
 
         if load_last:
