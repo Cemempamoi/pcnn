@@ -9,15 +9,11 @@ import os
 import torch.nn.functional as F
 
 
-DATA_SAVE_PATH = os.path.join("saves", "data")
-MODEL_SAVE_PATH = os.path.join("saves", "models")
+SAVE_PATH = 'saves'
+DATA_SAVE_PATH = os.path.join(SAVE_PATH, "data")
+MODEL_SAVE_PATH = os.path.join(SAVE_PATH, "models")
 
-# Create missing directories
-for path in [DATA_SAVE_PATH, MODEL_SAVE_PATH]:
-    if not os.path.isdir(path):
-        os.mkdir(path)
-
-def parameters(name: str = "Default_model", save_path: str = MODEL_SAVE_PATH,
+def parameters(name: str = "Default_model", save: bool = True, save_path: str = MODEL_SAVE_PATH,
                 seed: int = 0, batch_size: int = 128, shuffle: bool = True, n_epochs: int = 20,
                 learning_rate: float = 0.05, decrease_learning_rate:bool = True,
                 heating: bool = True, cooling: bool = True, loss = F.mse_loss,
@@ -33,6 +29,7 @@ def parameters(name: str = "Default_model", save_path: str = MODEL_SAVE_PATH,
 
     Returns:
         name:                       Name of the model
+        save:                       Whether to save the model
         save_path:                  Where to save models
         seed:                       To fix the seed for reproducibility
         heating:                    Whether to use the model for the heating season
@@ -62,6 +59,14 @@ def parameters(name: str = "Default_model", save_path: str = MODEL_SAVE_PATH,
         eps:                        Small value used for precision
     """
 
+    # Create missing directories
+    if save:
+        if not os.path.exists(SAVE_PATH):
+            os.mkdir(SAVE_PATH)
+        for path in [DATA_SAVE_PATH, MODEL_SAVE_PATH]:
+            if not os.path.isdir(path):
+                os.mkdir(path)
+
     assert cooling | heating, "At least heating or cooling needs to be true, otherwise nothing can be done"
 
     if feed_input_through_nn:
@@ -77,6 +82,7 @@ def parameters(name: str = "Default_model", save_path: str = MODEL_SAVE_PATH,
         division_factor = [division_factor]
 
     return dict(name=name,
+                save=save,
                 save_path=save_path,
                 seed=seed,
                 heating=heating,

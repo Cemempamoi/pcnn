@@ -110,7 +110,7 @@ class PCNN(nn.Module):
         self.power_column = kwargs['power_column']
         self.out_column = kwargs['out_column']
         self.neigh_column = kwargs['neigh_column']
-        self.division_factor = torch.Tensor(kwargs['division_factor']).to(self.device)
+        self.division_factor = torch.tensor(kwargs['division_factor']).to(self.device)
         self.eps = kwargs['eps']
 
         # Define latent variables
@@ -118,14 +118,14 @@ class PCNN(nn.Module):
         self.last_E = None  ## E
 
         # Recall normalization constants
-        self.temperature_min = torch.Tensor(kwargs['temperature_min']).to(self.device)
-        self.temperature_range = torch.Tensor(kwargs['temperature_range']).to(self.device)
+        self.temperature_min = torch.tensor(kwargs['temperature_min']).to(torch.float32).to(self.device)
+        self.temperature_range = torch.tensor(kwargs['temperature_range']).to(torch.float32).to(self.device)
         
         # Initial values for the physical parameters `a`, `b`, `c`, `d`
-        self.initial_value_a = torch.Tensor(kwargs['initial_values_physical_parameters']['a']).to(self.device)
-        self.initial_value_b = torch.Tensor(kwargs['initial_values_physical_parameters']['b']).to(self.device)
-        self.initial_value_c = torch.Tensor(kwargs['initial_values_physical_parameters']['c']).to(self.device)
-        self.initial_value_d = torch.Tensor(kwargs['initial_values_physical_parameters']['d']).to(self.device)
+        self.initial_value_a = torch.tensor(kwargs['initial_values_physical_parameters']['a']).to(torch.float32).to(self.device)
+        self.initial_value_b = torch.tensor(kwargs['initial_values_physical_parameters']['b']).to(torch.float32).to(self.device)
+        self.initial_value_c = torch.tensor(kwargs['initial_values_physical_parameters']['c']).to(torch.float32).to(self.device)
+        self.initial_value_d = torch.tensor(kwargs['initial_values_physical_parameters']['d']).to(torch.float32).to(self.device)
 
         # Build the models
         self._build_model()
@@ -358,7 +358,7 @@ class S_PCNN(nn.Module):
         self.temperature_column = kwargs['temperature_column']
         self.power_column = kwargs['power_column']
         self.out_column = kwargs['out_column']
-        self.division_factor = torch.Tensor(kwargs['division_factor']).to(self.device)
+        self.division_factor = torch.tensor(kwargs['division_factor']).to(torch.float32).to(self.device)
         self.eps = kwargs['eps']
         self.number_rooms = kwargs['number_rooms']
         self.outside_walls = kwargs['outside_walls']
@@ -375,16 +375,16 @@ class S_PCNN(nn.Module):
         self.last_E = None  ## E
 
         # Recall normalization constants
-        self.temperature_min = torch.Tensor(kwargs['temperature_min']).to(self.device)
-        self.temperature_range = torch.Tensor(kwargs['temperature_range']).to(self.device)
+        self.temperature_min = torch.Tensor(kwargs['temperature_min']).to(self.device).to(torch.float32).to(self.device)
+        self.temperature_range = torch.tensor(kwargs['temperature_range']).to(torch.float32).to(self.device)
         
         # Initial values for the physical parameters `a`, `b`, `c`, `d`
-        self.initial_value_a = torch.Tensor(kwargs['initial_values_physical_parameters']['a']).to(self.device)
-        self.initial_value_b = torch.Tensor(kwargs['initial_values_physical_parameters']['b']).to(self.device)
+        self.initial_value_a = torch.tensor(kwargs['initial_values_physical_parameters']['a']).to(torch.float32).to(self.device)
+        self.initial_value_b = torch.tensor(kwargs['initial_values_physical_parameters']['b']).to(torch.float32).to(self.device)
         # For parallelization
-        self.initial_value_c_1 = torch.Tensor(kwargs['initial_values_physical_parameters']['c'][0]).to(self.device)
-        self.initial_value_c_2 = torch.Tensor(kwargs['initial_values_physical_parameters']['c'][1]).to(self.device)
-        self.initial_value_d = torch.Tensor(kwargs['initial_values_physical_parameters']['d']).to(self.device)
+        self.initial_value_c_1 = torch.tensor(kwargs['initial_values_physical_parameters']['c'][0]).to(torch.float32).to(self.device)
+        self.initial_value_c_2 = torch.tensor(kwargs['initial_values_physical_parameters']['c'][1]).to(torch.float32).to(self.device)
+        self.initial_value_d = torch.tensor(kwargs['initial_values_physical_parameters']['d']).to(torch.float32).to(self.device)
 
         # Build the models
         self._build_model()
@@ -625,7 +625,7 @@ class M_PCNN(nn.Module):
         self.temperature_column = kwargs['temperature_column']
         self.power_column = kwargs['power_column']
         self.out_column = kwargs['out_column']
-        self.division_factor = torch.Tensor(kwargs['division_factor']).to(self.device)
+        self.division_factor = torch.tensor(kwargs['division_factor']).to(torch.float32).to(self.device)
         self.eps = kwargs['eps']
         self.number_rooms = kwargs['number_rooms']
         self.outside_walls = kwargs['outside_walls']
@@ -642,16 +642,16 @@ class M_PCNN(nn.Module):
         self.last_E = None  ## E
 
         # Recall normalization constants
-        self.temperature_min = torch.Tensor(kwargs['temperature_min']).to(self.device)
-        self.temperature_range = torch.Tensor(kwargs['temperature_range']).to(self.device)
+        self.temperature_min = torch.tensor(kwargs['temperature_min']).to(torch.float32).to(self.device)
+        self.temperature_range = torch.tensor(kwargs['temperature_range']).to(torch.float32).to(self.device)
         
         # Initial values for the physical parameters `a`, `b`, `c`, `d`
-        self.initial_value_a = torch.Tensor(kwargs['initial_values_physical_parameters']['a']).to(self.device)
-        self.initial_value_b = torch.Tensor(kwargs['initial_values_physical_parameters']['b']).to(self.device)
+        self.initial_value_a = torch.tensor(kwargs['initial_values_physical_parameters']['a']).to(torch.float32).to(self.device)
+        self.initial_value_b = torch.tensor(kwargs['initial_values_physical_parameters']['b']).to(torch.float32).to(self.device)
         # For parallelization
-        self.initial_value_c_1 = torch.Tensor(kwargs['initial_values_physical_parameters']['c'][0]).to(self.device)
-        self.initial_value_c_2 = torch.Tensor(kwargs['initial_values_physical_parameters']['c'][1]).to(self.device)
-        self.initial_value_d = torch.Tensor(kwargs['initial_values_physical_parameters']['d']).to(self.device)
+        self.initial_value_c_1 = torch.tensor(kwargs['initial_values_physical_parameters']['c'][0]).to(torch.float32).to(self.device)
+        self.initial_value_c_2 = torch.tensor(kwargs['initial_values_physical_parameters']['c'][1]).to(torch.float32).to(self.device)
+        self.initial_value_d = torch.tensor(kwargs['initial_values_physical_parameters']['d']).to(torch.float32).to(self.device)
 
         # Build the models
         self._build_model()

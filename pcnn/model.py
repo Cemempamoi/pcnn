@@ -10,6 +10,7 @@ from typing import Union
 import random
 import numpy as np
 from loguru import logger
+from timeit import default_timer
 
 import torch
 from torch.nn.utils.rnn import pad_sequence
@@ -87,6 +88,7 @@ class Model:
             self.device = model_kwargs['device']
 
         # Store needed parameters
+        self.save_model = model_kwargs["save"]
         self.batch_size = model_kwargs["batch_size"]
         self.shuffle = model_kwargs["shuffle"]
         self.n_epochs = model_kwargs["n_epochs"]
@@ -133,7 +135,7 @@ class Model:
         self.b = []
         self.c = []
         self.d = []
-        self.times = []
+        self.times = [0.]
 
         # Load the model if it exists
         self.train_sequences = None
@@ -147,23 +149,13 @@ class Model:
                                                   test_percentage=self.test_percentage)
 
         # Push everything to the right device
+        self.X = torch.from_numpy(self.dataset.X).to(torch.float32).to(self.device) 
+        self.Y = torch.from_numpy(self.dataset.Y).to(torch.float32).to(self.device)
         self.model = self.model.to(self.device)
-
-    @property
-    def X(self):
-        return self.dataset.X
-
-    @property
-    def Y(self):
-        return self.dataset.Y
 
     @property
     def columns(self):
         return self.dataset.data.columns
-
-    @property
-    def differences_Y(self):
-        return self.dataset.differences_Y
 
     def _fix_seeds(self, seed: int = None):
         """
@@ -306,7 +298,8 @@ class Model:
                 cooling_sequences = []
 
             # Save the built list to be able to load it later and avoid the computation
-            torch.save({"heating_sequences": heating_sequences, "cooling_sequences": cooling_sequences}, name)
+            if self.save_model:
+                torch.save({"heating_sequences": heating_sequences, "cooling_sequences": cooling_sequences}, name)
 
         if self.verbose > 0:
             logger.info(f"Number of sequences for the model {self.name}: {len(heating_sequences)} heating sequences and " f"{len(cooling_sequences)} cooling sequences.")
@@ -445,11 +438,10 @@ class Model:
             sequences = [sequences]
 
         # Iterate over the sequences to build the input in the right form
-        input_tensor_list = [torch.Tensor(self.X[sequence[0]: sequence[1], :].copy()) for sequence in sequences]
+        input_tensor_list = [self.X[sequence[0]: sequence[1], :].clone() for sequence in sequences]
 
         # Prepare the output for the temperature and power consumption
-        output_tensor_list = [torch.Tensor(self.Y[sequence[0]: sequence[1], :].copy()) for sequence in
-                                    sequences]
+        output_tensor_list = [self.Y[sequence[0]: sequence[1], :].clone() for sequence in sequences]
 
 
         # Build the final results by taking care of the batch_size=1 case
@@ -461,7 +453,7 @@ class Model:
             batch_y = output_tensor_list[0].view(1, output_tensor_list[0].shape[0], -1)
 
         # Return everything
-        return batch_x.to(self.device), batch_y.to(self.device)
+        return batch_x, batch_y
 
     def predict(self, sequences: Union[list, int] = None, data: torch.Tensor = None, mpc_mode: bool = False):
         """
@@ -570,13 +562,17 @@ class Model:
 
         return predictions, true
 
-    def fit(self, n_epochs: int = None, number_sequences: int = None, print_each: int = 1, output_best: bool = True) -> None:
+    def fit(self, n_epochs: int = None, number_sequences: int = None, print_each: int = 1,
+            output_best: bool = True) -> None:
         """
         General function fitting a model for several epochs, training and evaluating it on the data.
 
         Args:
             n_epochs:         Number of epochs to fit the model, if None this takes the default number
                                 defined by the parameters
+            number_sequences: Number of sequences to use for training, validation and testing
+            print_each:       Number of epochs to print the loss
+            output_best:      Whether to output the best model
 
         Returns:
             Nothing
@@ -683,7 +679,7 @@ class Model:
                 self.test_losses.append(test_loss)
 
                 # Timing information
-                self.times.append(elapsed())
+                self.times.append(elapsed() + self.times[-1])
 
                 # Prints
                 if ((self.verbose > 0) and (epoch % print_each == 0)) or (validation_loss < best_loss):
@@ -699,11 +695,16 @@ class Model:
                     self.d.append(p[3])
 
                 # Save last and possibly best model
-                self.save(name_to_add="last", verbose=0)
-
+                if self.save_model:
+                    self.save(name_to_add="last", verbose=0)
+                    if validation_loss < best_loss:
+                        self.save(name_to_add="best", verbose=0)
+                    
+                # Store the best loss
                 if validation_loss < best_loss:
-                    self.save(name_to_add="best", verbose=1 if epoch > 0 else 0)
                     best_loss = validation_loss
+                    if epoch > 0:
+                        print('New best!')
 
             if self.verbose > 0:
                 time.sleep(0.7) # For clean printing, let the last test losses be printed before going ahead
@@ -820,11 +821,11 @@ class Model:
             # Put it into the model
             self.model.load_state_dict(checkpoint["model_state_dict"])
             self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-            if torch.cuda.is_available():
+            if self.device != 'cpu':
                 for state in self.optimizer.state.values():
                     for k, v in state.items():
                         if isinstance(v, torch.Tensor):
-                            state[k] = v.cuda()
+                            state[k] = v.to(self.device)
             self.train_sequences = checkpoint["train_sequences"]
             self.validation_sequences = checkpoint["validation_sequences"]            
             self.test_sequences = checkpoint["test_sequences"]
@@ -844,15 +845,15 @@ class Model:
                                 for a,b in zip(self.model_kwargs[key][x], checkpoint['model_kwargs'][key][y]):
                                     if a != b:
                                         logger.warning(f"The parameter {key} was found in the checkpoint as {checkpoint['model_kwargs'][key]} "
-                                            f"while you passed {self.model_kwargs[key]}. The checkpoint value is used for compliance with the model found.")
+                                            f"while you passed {self.model_kwargs[key]}.")
                     elif np.any(self.model_kwargs[key] != checkpoint['model_kwargs'][key]):
                         logger.warning(f"The parameter {key} was found in the checkpoint as {checkpoint['model_kwargs'][key]} "
-                                       f"while you passed {self.model_kwargs[key]}. The checkpoint value is used for compliance with the model found.")
+                                       f"while you passed {self.model_kwargs[key]}.")
             for key in self.data_kwargs:
                 if key in checkpoint['data_kwargs']:
                     if np.any(self.data_kwargs[key] != checkpoint['data_kwargs'][key]):  
                         logger.warning(f"The parameter {key} was found in the checkpoint as {checkpoint['data_kwargs'][key]} "
-                                       f"while you passed {self.data_kwargs[key]}. The checkpoint value is used for compliance with the model found.")
+                                       f"while you passed {self.data_kwargs[key]}.")
             self.model_kwargs = checkpoint["model_kwargs"]
             self.data_kwargs = checkpoint["data_kwargs"]
 
