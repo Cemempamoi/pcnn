@@ -714,7 +714,7 @@ class Model:
                 logger.info(f"Test loss:\t{self.test_losses[best_epoch]:.2E}")
 
             if output_best:
-                self.load(load_last=False)
+                self.load(load_last=False, verbose=0)
                 logger.info('Loaded and returned the best obtained model!')
 
 
@@ -787,7 +787,7 @@ class Model:
             save_name,
         )
 
-    def load(self, load_last: bool = False):
+    def load(self, load_last: bool = False, verbose: int = None):
         """
         Function trying to load an existing model, by default the best one if it exists. But for training purposes,
         it is possible to load the last state of the model instead.
@@ -799,12 +799,15 @@ class Model:
              Nothing, everything is done in place and stored in the parameters.
         """
 
+        if verbose = None:
+            verbose = self.verbose
+
         if load_last:
             save_name = os.path.join(self.save_name, "last_model.pt")
         else:
             save_name = os.path.join(self.save_name, "best_model.pt")
 
-        if self.verbose > 0:
+        if verbose > 0:
             logger.info("Trying to load a trained model...")
         try:
             # Build the full path to the model and check its existence
@@ -854,7 +857,7 @@ class Model:
             self.data_kwargs = checkpoint["data_kwargs"]
 
             # Print the current status of the found model
-            if self.verbose > 0:
+            if verbose > 0:
                 logger.info(f"Found! It contains {len(self.train_sequences)} training, {len(self.validation_sequences)} validation, and {len(self.test_sequences)} test sequences.")
                 if load_last:
                     logger.info(f"The model has been fitted for {len(self.train_losses)} epochs already. Last checkpoint:")
