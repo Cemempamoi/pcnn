@@ -18,7 +18,7 @@ def parameters(name: str = "Default_model", save: bool = True, save_path: str = 
                 learning_rate: float = 0.05, decrease_learning_rate:bool = True,
                 heating: bool = True, cooling: bool = True, loss = F.mse_loss,
                 warm_start_length: int = 12, minimum_sequence_length: int = 5, maximum_sequence_length: int = 240,
-                overlapping_distance: int = 4, validation_percentage: float = 0.2, test_percentage: float = 0.1,
+                overlapping_distance: int = 4, validation_percentage: float = 0.1, test_percentage: float = 0.1,
                 learn_initial_hidden_states: bool = True, feed_input_through_nn: bool = True,
                 input_nn_hidden_sizes: list = [128], lstm_hidden_size: int = 256,
                 layer_norm: bool = True, lstm_num_layers: int = 1,

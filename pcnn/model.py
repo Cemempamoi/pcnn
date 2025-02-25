@@ -86,6 +86,10 @@ class Model:
             model_kwargs['device'] = self.device
         else:
             self.device = model_kwargs['device']
+        
+        # Push everything to the right device
+        self.X = torch.from_numpy(self.dataset.X).to(torch.float32).to(self.device) 
+        self.Y = torch.from_numpy(self.dataset.Y).to(torch.float32).to(self.device)
 
         # Store needed parameters
         self.save_model = model_kwargs["save"]
@@ -148,9 +152,6 @@ class Model:
             self.train_test_validation_separation(validation_percentage=self.validation_percentage,
                                                   test_percentage=self.test_percentage)
 
-        # Push everything to the right device
-        self.X = torch.from_numpy(self.dataset.X).to(torch.float32).to(self.device) 
-        self.Y = torch.from_numpy(self.dataset.Y).to(torch.float32).to(self.device)
         self.model = self.model.to(self.device)
 
     @property
@@ -224,6 +225,12 @@ class Model:
             # We should have the same number of series beginning and ending
             assert len(beginnings) == len(ends), "Something went wrong"
 
+            # Shuffle the sequences to ensure training/validation/test are spread over the entire data
+            seqs = np.arange(len(ends))
+            np.random.shuffle(seqs)
+            beginnings = list(np.array(beginnings)[seqs])
+            ends = list(np.array(ends)[seqs])
+
             # Bulk of the work: create starts and ends of sequences tuples
             for beginning, end in zip(beginnings, ends):
                 # Add sequences from the start to the end, jumping with the wanted overlapping distance and ensuring
@@ -284,14 +291,14 @@ class Model:
 
             # Create the sequences
             if self.heating:
-                X_ = X.copy()
+                X_ = X.clone()
                 X_[np.where(X_[:, self.case_column[0]] < 0.5)[0]] = np.nan
                 heating_sequences = self._create_sequences(X=X_, Y=Y)
             else:
                 heating_sequences = []
 
             if self.cooling:
-                X_ = X.copy()
+                X_ = X.clone()
                 X_[np.where(X_[:, self.case_column[0]] > 0.5)[0]] = np.nan
                 cooling_sequences = self._create_sequences(X=X_, Y=Y)
             else:
@@ -596,6 +603,7 @@ class Model:
         # Assess the number of epochs the model was already trained on to get nice prints
         trained_epochs = len(self.train_losses)
 
+        start_time = self.times[-1]
         if self.verbose > 0:
             print('Epoch\tTrain loss\tVal loss\tTest loss\tTime')
 
@@ -679,7 +687,7 @@ class Model:
                 self.test_losses.append(test_loss)
 
                 # Timing information
-                self.times.append(elapsed() + self.times[-1])
+                self.times.append(elapsed() + start_time)
 
                 # Prints
                 if ((self.verbose > 0) and (epoch % print_each == 0)) or (validation_loss < best_loss):
