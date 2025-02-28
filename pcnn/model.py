@@ -74,8 +74,6 @@ class Model:
         # Create the name associated to the model
         self.name = model_kwargs["name"]
         self.save_name = model_save_name_factory(module=module, model_kwargs=model_kwargs)
-        if not os.path.isdir(self.save_name):
-            os.mkdir(self.save_name)
 
         # Fix the seeds for reproduction
         self._fix_seeds(seed=model_kwargs["seed"])

@@ -128,6 +128,10 @@ def model_save_name_factory(module, model_kwargs):
     elif (model_kwargs["cooling"]) & (not model_kwargs["heating"]):
         name += "_cooling"
 
+    if model_kwargs['save']:
+        if not os.path.isdir(name):
+            os.mkdir(name)
+
     return name
 
 
