@@ -233,13 +233,14 @@ class Model:
             beginnings = list(np.array(beginnings)[seqs])
             ends = list(np.array(ends)[seqs])
 
-            # Bulk of the work: create starts and ends of sequences tuples
-            for beginning, end in zip(beginnings, ends):
+            # Bulk of the work: create starts and ends of sequences tuples, and store which group they belong to
+            # (the group is used when separating train, validation, and test sequences)
+            for group, (beginning, end) in enumerate(zip(beginnings, ends)):
                 # Add sequences from the start to the end, jumping with the wanted overlapping distance and ensuring
                 # the required warm start length and minimum sequence length are respected
                 sequences += [(beginning + self.overlapping_distance * x,
                                min(beginning + self.warm_start_length + self.maximum_sequence_length
-                                   + self.overlapping_distance * x, end))
+                                   + self.overlapping_distance * x, end), group)
                     for x in range(math.ceil((end - beginning - self.warm_start_length
                                               - self.minimum_sequence_length) / self.overlapping_distance))]
 
@@ -352,37 +353,90 @@ class Model:
             if len(sequences) > 0:
                 # Given the total number of sequences, define approximate separations between training
                 # validation and testing sets
-                train_validation_sep = int((1 - test_percentage - validation_percentage) * len(sequences))
-                validation_test_sep = int((1 - test_percentage) * len(sequences))
+                train_validation_sep_start = train_validation_sep_end = int((1 - test_percentage - validation_percentage) * len(sequences))
+                validation_test_sep_start = validation_test_sep_end = int((1 - test_percentage) * len(sequences))
 
                 # Little trick to ensure training, validation and test sequences are completely distinct
+                # works by decreasing/increasing the start/end of each split until total separation is guaranteee
+                # This happens either if the end of the last training sequence is before the start of the first validation sequence,
+                # or if the group is different(sequences are not from the same part of the data, as defined in '_create_sequences')
+
+                # Train/validation separation
+                increase_blocked = False
+                decrease_blocked = False
                 while True:
-                    if (sequences[train_validation_sep - 1][1] < sequences[train_validation_sep][0]) | (train_validation_sep == 0):
+                    # If the end of the last training sequence is before the start of the first validation sequence, the sets are distinct
+                    if sequences[train_validation_sep_start-1][1] < sequences[train_validation_sep_end][0]:
                         break
-                    train_validation_sep -= 1
-
-                # Check if the training and validation sets are completely distinct
-                # If there is no missing data, the above code will fail to fully separate train and validation sequences
-                # In that casem fall back to the default threshold
-                if train_validation_sep == 0:
-                    logger.warning(f"Could not fully separate training and validation {'heating' if i==0 else 'cooling'} sequences, some data will overlap.")
-                    logger.info("This error arises if there is no missing data - to avoid it, remove a datapoint (set it to Nan) in the data where the seapration should be.\n")
-                    train_validation_sep = int((1 - test_percentage - validation_percentage) * len(sequences))
-
+                    # Or, if the group is different, the sets are distinct 
+                    if sequences[train_validation_sep_start-1][2] != sequences[train_validation_sep_end][2]:
+                        # In that case, we can take the entire original group either 
+                        # in the validation set (if we were decreasing the start of the split)
+                        if not decrease_blocked:
+                            train_validation_sep_end = train_validation_sep_start + 1
+                        # or in the traning set (if we were increasing the end of the split)
+                        else:
+                            train_validation_sep_start = train_validation_sep_end - 1
+                        break
+                    # Otherwise, while they are not distinct, try decreasing the start of the split if not yet blocked
+                    if not decrease_blocked:
+                        if train_validation_sep_start > 1:
+                            train_validation_sep_start -= 1
+                        # If reached the beginning, block the decrease
+                        else:
+                            decrease_blocked = True
+                    # If decreasing is blocked, try increasing the end of the split if not yet blocked
+                    elif not increase_blocked:
+                        if validation_test_sep_end < validation_test_sep_start - 1:
+                            validation_test_sep_end += 1 
+                        # If reached the end, block the increase
+                        else:
+                            increase_blocked = True
+                    # If both are blocked, we can't separate the sequences, log a warning and break
+                    else:
+                        logger.warning(f"Could not separate train and validation {'heating' if i==0 else 'cooling'} sequences, not enough data!")
+                        logger.warning(f"There is only on train and one validation {'heating' if i==0 else 'cooling'} sequence, and overlapping.")
+                        break
+                    
+                # Validation/test separation (works the same way as above)
+                increase_blocked = False
+                decrease_blocked = False
                 while True:
-                    if (sequences[validation_test_sep - 1][1] < sequences[validation_test_sep][0]) | (validation_test_sep == train_validation_sep):
+                    if sequences[validation_test_sep_start-1][1] < sequences[validation_test_sep_end][0]:
                         break
-                    validation_test_sep -= 1
+                    if sequences[validation_test_sep_start-1][2] != sequences[validation_test_sep_end][2]:
+                        if decrease_blocked:
+                            validation_test_sep_end = validation_test_sep_start + 1
+                        else:
+                            validation_test_sep_start = validation_test_sep_end - 1
+                        break
+                    if not decrease_blocked:
+                        if validation_test_sep_start > train_validation_sep_end + 1:
+                            validation_test_sep_start -= 1
+                        else:
+                            decrease_blocked = True
+                    elif not increase_blocked:
+                        if validation_test_sep_end < len(sequences) - 1:
+                            validation_test_sep_end += 1 
+                        else:
+                            increase_blocked = True
+                    else:
+                        logger.warning(f"Could not separate validation and test {'heating' if i==0 else 'cooling'} sequences, not enough data!")
+                        logger.warning(f"There is only one validation and one test {'heating' if i==0 else 'cooling'} sequence, and overlapping.")
+                        break
+                                                
+                # Sanity check to ensure sets are not empty
+                if train_validation_sep_start == 0:
+                   logger.warning(f"No training {'heating' if i==0 else 'cooling'} sequences could not be created without overlapping!")
+                if train_validation_sep_end == validation_test_sep_start:
+                   logger.warning(f"No validation {'heating' if i==0 else 'cooling'} sequences could not be created without overlapping!")
+                if validation_test_sep_end == len(sequences):
+                   logger.warning(f"No test {'heating' if i==0 else 'cooling'} sequences could not be created without overlapping!")
 
-                if validation_test_sep == train_validation_sep:
-                    logger.warning(f"Could not fully separate validation and testing {'heating' if i==0 else 'cooling'} sequences, some data will overlap.")
-                    logger.info("This error arises if there is no missing data - to avoid it, remove a datapoint (set it to Nan) in the data where the seapration should be.\n")
-                    validation_test_sep = int((1 - test_percentage) * len(sequences))
-
-                # Prepare the lists
-                self.train_sequences += sequences[:train_validation_sep]
-                self.validation_sequences += sequences[train_validation_sep:validation_test_sep]
-                self.test_sequences += sequences[validation_test_sep:]
+                # Prepare the lists according to the defined splits
+                self.train_sequences += sequences[:train_validation_sep_start+1]
+                self.validation_sequences += sequences[train_validation_sep_end:validation_test_sep_start+1]
+                self.test_sequences += sequences[validation_test_sep_end:]
 
     def batch_iterator(self, iterator_type: str = "train", batch_size: int = None, shuffle: bool = True) -> None:
         """
