@@ -225,7 +225,11 @@ class Model:
 
             # Shuffle the sequences to ensure training/validation/test are spread over the entire data
             seqs = np.arange(len(ends))
+
+            # For reproducibility - different models trained on the same data should have the same sequences
+            np.random.seed(self.data_kwargs['seed'])
             np.random.shuffle(seqs)
+            np.random.seed(self.model_kwargs['seed'])
             beginnings = list(np.array(beginnings)[seqs])
             ends = list(np.array(ends)[seqs])
 
