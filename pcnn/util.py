@@ -199,7 +199,18 @@ def ensure_list(value):
                 return value
     else:
         return None
-
+    
+def flatten_unique_list(lst):
+    """
+    Get unique items in a potential list of lists, else return the list
+    """
+    if isinstance(lst[0], list):
+        res = []
+        for item in lst:
+            res += item
+        return list(set(res))
+    else:
+        return lst
 
 def common_initialization(temperature_difference, factor, time_elapsed_hours, parameters):
     """

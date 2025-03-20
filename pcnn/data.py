@@ -2,7 +2,7 @@ from loguru import logger
 import pandas as pd
 import numpy as np
 
-from pcnn.util import normalize, inverse_normalize, ensure_list
+from pcnn.util import normalize, inverse_normalize, ensure_list, flatten_unique_list
 
 
 class DataSet:
@@ -75,7 +75,7 @@ class DataSet:
         in module.py and expected to be between 0.1 (cooling) or 0.9 (heating)
         """
         return [x for x in self.data.columns if x in 
-                data_kwargs['temperature_column'] + data_kwargs['inputs_D'] + data_kwargs['case_column']]
+                data_kwargs['temperature_column'] + flatten_unique_list(data_kwargs['inputs_D']) + data_kwargs['case_column']]
 
     def get_columns_indices(self, data_kwargs: dict):
         """
