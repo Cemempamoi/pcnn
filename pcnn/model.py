@@ -665,7 +665,7 @@ class Model:
 
         with elapsed_timer() as elapsed:
 
-            for epoch in range(trained_epochs, trained_epochs + n_epochs):
+            for epoch in range(trained_epochs, trained_epochs + n_epochs + 1):
 
                 # Start the training, define a list to retain the training losses along the way
                 if epoch > 0:
@@ -720,7 +720,7 @@ class Model:
                         validation_sizes.append(len(batch_sequences))
 
                 # Compute the average validation loss of the epoch and print it
-                validation_loss = sum([loss*size for loss,size in zip(validation_losses, train_sizes)]) / sum(validation_sizes)
+                validation_loss = sum([loss*size for loss,size in zip(validation_losses, validation_sizes)]) / sum(validation_sizes)
                 self.validation_losses.append(validation_loss)                    
 
                 # Start the test, again defining a list to recall the losses
@@ -773,7 +773,7 @@ class Model:
             if self.verbose > 0:
                 time.sleep(0.7) # For clean printing, let the last test losses be printed before going ahead
                 best_epoch = np.argmin([x for x in self.validation_losses])
-                logger.info(f"The best model was obtained at epoch {best_epoch + 1} after training for " f"{trained_epochs + n_epochs} epochs in {format_elapsed_time(0, self.times[-1])}")
+                logger.info(f"The best model was obtained at epoch {best_epoch} after training for " f"{trained_epochs + n_epochs} epochs in {format_elapsed_time(0, self.times[-1])}")
                 logger.info(f"Train loss:\t{self.train_losses[best_epoch]:.2E}")
                 logger.info(f"Val loss:\t{self.validation_losses[best_epoch]:.2E}")
                 logger.info(f"Test loss:\t{self.test_losses[best_epoch]:.2E}")
@@ -926,9 +926,9 @@ class Model:
             if verbose > 0:
                 logger.info(f"Found! It contains {len(self.train_sequences)} training, {len(self.validation_sequences)} validation, and {len(self.test_sequences)} test sequences.")
                 if load_last:
-                    logger.info(f"The model has been fitted for {len(self.train_losses)} epochs already. Last checkpoint:")
+                    logger.info(f"The model has been fitted for {len(self.train_losses) - 1} epochs already. Last checkpoint:")
                 else:
-                    logger.info(f"The model achieved its best performance after {len(self.train_losses)} epochs:")
+                    logger.info(f"The model achieved its best performance after {len(self.train_losses) - 1} epochs:")
                 logger.info(f"Train loss:\t{self.train_losses[-1]:.2E}")
                 logger.info(f"Val loss:\t{self.validation_losses[-1]:.2E}")
                 logger.info(f"Test loss:\t{self.test_losses[-1]:.2E}")
