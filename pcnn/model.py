@@ -809,7 +809,8 @@ class Model:
         """
 
         predictions, batch_y = self.predict(sequences=sequences)
-        return self.loss(predictions, batch_y)
+        mask = (batch_y > 0.05)*1.
+        return self.loss(predictions, batch_y, weight=mask)
 
     def save(self, name_to_add: str = None, verbose: int = 0):
         """
