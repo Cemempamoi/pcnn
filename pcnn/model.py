@@ -395,7 +395,7 @@ class Model:
                     # If both are blocked, we can't separate the sequences, log a warning and break
                     else:
                         logger.warning(f"Could not separate train and validation {'heating' if i==0 else 'cooling'} sequences, not enough data!")
-                        logger.warning(f"There is only on train and one validation {'heating' if i==0 else 'cooling'} sequence, and overlapping.")
+                        logger.warning(f"There is only one train and one validation {'heating' if i==0 else 'cooling'} sequence, and overlapping.")
                         break
                     
                 # Validation/test separation (works the same way as above)
@@ -575,7 +575,7 @@ class Model:
         else:
             return predictions
 
-    def scale_back_predictions(self, sequences: Union[list, int] = None, data: torch.Tensor = None):
+    def predict_temperature(self, sequences: Union[list, int] = None, data: torch.Tensor = None):
         """
         Function preparing the data for analyses: it predicts the wanted sequences and returns the scaled
         predictions and true_data
@@ -611,19 +611,19 @@ class Model:
             true_data = true_data.reshape(1, true_data.shape[0], -1)
 
         # Scale the data back
-        truth = true_data.reshape(true_data.shape[0], true_data.shape[1], -1)
-        true = np.zeros_like(predictions)
-
         if self.dataset.is_normalized:
-            for i, sequence in enumerate(sequences):
-                predictions[i, :, :] = inverse_normalize(data=predictions[i, :, :],
-                                                         min_=self.dataset.min_[self.dataset.Y_columns],
-                                                         max_=self.dataset.max_[self.dataset.Y_columns])
-                true[i, :, :] = inverse_normalize(data=truth[i, :, :],
-                                                       min_=self.dataset.min_[self.dataset.Y_columns],
-                                                       max_=self.dataset.max_[self.dataset.Y_columns])
+            predictions = inverse_normalize(data=predictions,
+                                            min_=self.model_kwargs['temperature_min'],
+                                            max_=self.model_kwargs['temperature_min'] + self.model_kwargs['temperature_range'])
+            true_data = inverse_normalize(data=true_data,
+                                          min_=self.model_kwargs['temperature_min'],
+                                          max_=self.model_kwargs['temperature_min'] + self.model_kwargs['temperature_range'])
+            
+        # Remove padded values
+        predictions[true_data < self.model_kwargs['temperature_min'] + 1e-6] = np.nan
+        true_data[true_data < self.model_kwargs['temperature_min'] + 1e-6] = np.nan
 
-        return predictions, true
+        return predictions, true_data
 
     def fit(self, n_epochs: int = None, number_sequences: int = None, print_each: int = 1,
             output_best: bool = True) -> None:

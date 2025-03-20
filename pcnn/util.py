@@ -83,22 +83,29 @@ def inverse_normalize(data: Union[np.ndarray, pd.DataFrame, float], min_: Union[
     else:
         # Get the places where the variance is not zero and multiply back
         # (the other columns were ignored)
-        non_zero_div = np.where(max_ - min_ > 1e-10)[0]
+        non_zero_div = np.where(max_ - min_ > 1e-6)[0]
 
-        # If the given data is an array
-        if isinstance(data, np.ndarray):
-            # Can get back to the original scale back
-            data[:, non_zero_div] = (data[:, non_zero_div] - 0.1) * (max_[non_zero_div] - min_[non_zero_div]).values.reshape(1, -1) / 0.8
-            data[:, non_zero_div] = data[:, non_zero_div] + min_[non_zero_div].values.reshape(1, -1)
+        if len(data.shape) == 2:
+            
+            if isinstance(min_, pd.Series): 
+                min_ = min_.values
+                max_ = max_.values
+            # If the given data is an array
+            if isinstance(data, np.ndarray):
+                # Can get back to the original scale back
+                data[:, non_zero_div] = (data[:, non_zero_div] - 0.1) * (max_[non_zero_div] - min_[non_zero_div]) / 0.8 + min_[non_zero_div]
 
-        # If the given data is a DataFrame
-        elif isinstance(data, pd.DataFrame):
-            # Can get back to the original scale back
-            data.iloc[:, non_zero_div] = (data.iloc[:, non_zero_div] - 0.1).multiply(max_.iloc[non_zero_div] - min_.iloc[non_zero_div]) / 0.8
-            data.iloc[:, non_zero_div] = data.iloc[:, non_zero_div].add(min_.iloc[non_zero_div])
+            # If the given data is a DataFrame
+            elif isinstance(data, pd.DataFrame):
+                # Can get back to the original scale back
+                data.iloc[:, non_zero_div] = (data.iloc[:, non_zero_div] - 0.1).multiply(max_[non_zero_div] - min_[non_zero_div]) / 0.8
+                data.iloc[:, non_zero_div] = data.iloc[:, non_zero_div].add(min_[non_zero_div])
 
-        else:
-            raise ValueError(f"Unexpected data type {type(data)}")
+            else:
+                raise ValueError(f"Unexpected data type {type(data)}")
+        
+        elif len(data.shape) == 3:
+            data[:, :, non_zero_div] = (data[:, :, non_zero_div] - 0.1) * (max_[non_zero_div] - min_[non_zero_div]) / 0.8 + min_[non_zero_div]
 
     return data
 
