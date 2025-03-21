@@ -210,7 +210,7 @@ def flatten_unique_list(lst):
             res += item
         res = list(set(res))
         # Critical! Sort the list, otherwise the order returned by the set is not guaranteed and then
-        # The order of the columns in the data can differ when used to compute the columns of M-PCNNs
+        # the order of the columns in the data can differ when used to compute the columns of M-PCNNs
         res.sort()
         return res
     else:
